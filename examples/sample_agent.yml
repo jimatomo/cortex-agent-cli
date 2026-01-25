@@ -2,7 +2,7 @@ deploy:
   database: TEST_DB
   schema: PUBLIC
 
-name: my-support-agent
+name: MY-SUPPORT-AGENT
 comment: Customer support agent
 profile:
   display_name: Support Bot

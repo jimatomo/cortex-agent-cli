@@ -33,12 +33,61 @@ func Diff(local, remote agent.AgentSpec) ([]Change, error) {
 	return DiffWithOptions(local, remote, Options{})
 }
 
-func DiffWithOptions(local, remote agent.AgentSpec, opts Options) ([]Change, error) {
-	localMap, err := toMap(local)
+// DiffForCreate returns changes representing a new resource creation.
+// All non-empty fields in the spec are shown as Added changes.
+func DiffForCreate(spec agent.AgentSpec) ([]Change, error) {
+	specMap, err := ToMap(spec)
 	if err != nil {
 		return nil, err
 	}
-	remoteMap, err := toMap(remote)
+	var changes []Change
+	collectAdded("", specMap, &changes)
+	return changes, nil
+}
+
+// collectAdded recursively collects all non-nil values as Added changes.
+func collectAdded(path string, value any, changes *[]Change) {
+	if value == nil {
+		return
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		if len(v) == 0 {
+			return
+		}
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		// Use API field order for top-level keys, alphabetical for nested
+		if path == "" {
+			sortAgentKeys(keys)
+		} else {
+			sort.Strings(keys)
+		}
+		for _, k := range keys {
+			nextPath := joinPath(path, k)
+			collectAdded(nextPath, v[k], changes)
+		}
+	case []any:
+		if len(v) == 0 {
+			return
+		}
+		for i, item := range v {
+			nextPath := fmt.Sprintf("%s[%d]", path, i)
+			collectAdded(nextPath, item, changes)
+		}
+	default:
+		*changes = append(*changes, Change{Path: path, Type: Added, Before: value, After: nil})
+	}
+}
+
+func DiffWithOptions(local, remote agent.AgentSpec, opts Options) ([]Change, error) {
+	localMap, err := ToMap(local)
+	if err != nil {
+		return nil, err
+	}
+	remoteMap, err := ToMap(remote)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +101,8 @@ func HasChanges(changes []Change) bool {
 	return len(changes) > 0
 }
 
-func toMap(spec agent.AgentSpec) (map[string]any, error) {
+// ToMap converts an AgentSpec to a map for comparison.
+func ToMap(spec agent.AgentSpec) (map[string]any, error) {
 	data, err := json.Marshal(spec)
 	if err != nil {
 		return nil, fmt.Errorf("marshal spec: %w", err)
@@ -91,7 +141,12 @@ func diffAny(path string, local, remote any, changes *[]Change, opts Options) {
 		if opts.IgnoreMissingRemote {
 			keys = keysOf(r)
 		}
-		sort.Strings(keys)
+		// Use API field order for top-level keys, alphabetical for nested
+		if path == "" {
+			sortAgentKeys(keys)
+		} else {
+			sort.Strings(keys)
+		}
 		for _, k := range keys {
 			nextPath := joinPath(path, k)
 			diffAny(nextPath, l[k], r[k], changes, opts)
@@ -153,4 +208,35 @@ func joinPath(prefix, key string) string {
 		return key
 	}
 	return prefix + "." + key
+}
+
+// agentFieldOrder defines the preferred field order based on Snowflake Cortex Agents REST API documentation.
+var agentFieldOrder = map[string]int{
+	"name":           0,
+	"comment":        1,
+	"profile":        2,
+	"models":         3,
+	"instructions":   4,
+	"orchestration":  5,
+	"tools":          6,
+	"tool_resources": 7,
+}
+
+// sortAgentKeys sorts keys according to the Snowflake Cortex Agents REST API field order.
+// Keys not in the predefined order are sorted alphabetically and placed at the end.
+func sortAgentKeys(keys []string) {
+	sort.Slice(keys, func(i, j int) bool {
+		oi, oki := agentFieldOrder[keys[i]]
+		oj, okj := agentFieldOrder[keys[j]]
+		if oki && okj {
+			return oi < oj
+		}
+		if oki {
+			return true
+		}
+		if okj {
+			return false
+		}
+		return keys[i] < keys[j]
+	})
 }

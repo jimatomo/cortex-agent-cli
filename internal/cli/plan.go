@@ -55,6 +55,18 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 				if !exists {
 					createCount++
 					color.New(color.FgGreen).Fprintln(os.Stdout, "  + create")
+					// Show what will be created
+					createChanges, err := diff.DiffForCreate(item.Spec)
+					if err != nil {
+						return fmt.Errorf("%s: %w", item.Path, err)
+					}
+					for _, c := range createChanges {
+						fmt.Fprintf(os.Stdout, "    %s %s: %s\n",
+							color.New(color.FgGreen).Sprint("+"),
+							c.Path,
+							formatValue(c.Before),
+						)
+					}
 					continue
 				}
 

@@ -82,7 +82,40 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 				planItems = append(planItems, applyItem{Parsed: item, Target: target, Exists: true, Changes: changes})
 			}
 
-			fmt.Fprintf(os.Stdout, "Plan: %d to create, %d to update, %d unchanged\n", createCount, updateCount, noChangeCount)
+			// Show detailed plan output
+			for _, item := range planItems {
+				fmt.Fprintf(os.Stdout, "%s:\n", item.Parsed.Spec.Name)
+				if !item.Exists {
+					color.New(color.FgGreen).Fprintln(os.Stdout, "  + create")
+					// Show what will be created
+					createChanges, err := diff.DiffForCreate(item.Parsed.Spec)
+					if err != nil {
+						return fmt.Errorf("%s: %w", item.Parsed.Path, err)
+					}
+					for _, c := range createChanges {
+						fmt.Fprintf(os.Stdout, "    %s %s: %s\n",
+							color.New(color.FgGreen).Sprint("+"),
+							c.Path,
+							formatValue(c.Before),
+						)
+					}
+					continue
+				}
+				if !diff.HasChanges(item.Changes) {
+					color.New(color.FgCyan).Fprintln(os.Stdout, "  = no changes")
+					continue
+				}
+				for _, c := range item.Changes {
+					fmt.Fprintf(os.Stdout, "  %s %s: %s -> %s\n",
+						changeSymbol(c.Type),
+						c.Path,
+						formatValue(c.After),
+						formatValue(c.Before),
+					)
+				}
+			}
+
+			fmt.Fprintf(os.Stdout, "\nPlan: %d to create, %d to update, %d unchanged\n", createCount, updateCount, noChangeCount)
 			if createCount+updateCount == 0 {
 				return nil
 			}

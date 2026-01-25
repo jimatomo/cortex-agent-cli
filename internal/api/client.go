@@ -35,6 +35,33 @@ func (e APIError) Error() string {
 	return fmt.Sprintf("api error: status=%d body=%s", e.StatusCode, e.Body)
 }
 
+// isNotFoundError checks if the error indicates a resource does not exist.
+// This includes HTTP 404 errors and Snowflake SQL errors for non-existent objects.
+func isNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if apiErr, ok := err.(APIError); ok {
+		if apiErr.StatusCode == 404 {
+			return true
+		}
+		// Check for Snowflake SQL error messages indicating object does not exist
+		bodyLower := strings.ToLower(apiErr.Body)
+		if strings.Contains(bodyLower, "does not exist") ||
+			strings.Contains(bodyLower, "object does not exist") ||
+			strings.Contains(bodyLower, "agent") && strings.Contains(bodyLower, "not found") ||
+			strings.Contains(bodyLower, "002003") { // Snowflake error code for object not found
+			return true
+		}
+	}
+	errMsg := strings.ToLower(err.Error())
+	if strings.Contains(errMsg, "does not exist") ||
+		strings.Contains(errMsg, "not found") {
+		return true
+	}
+	return false
+}
+
 func NewClient(cfg auth.Config) (*Client, error) {
 	return NewClientWithDebug(cfg, false)
 }
@@ -158,6 +185,10 @@ func (c *Client) describeAgent(ctx context.Context, db, schema, name string) (ag
 	}
 	var resp sqlStatementResponse
 	if err := c.doJSON(ctx, http.MethodPost, c.sqlURL(), payload, &resp); err != nil {
+		// Check if the error indicates the agent does not exist
+		if isNotFoundError(err) {
+			return agent.AgentSpec{}, false, nil
+		}
 		return agent.AgentSpec{}, false, err
 	}
 	if len(resp.Data) == 0 || len(resp.ResultSetMetaData.RowType) == 0 {
