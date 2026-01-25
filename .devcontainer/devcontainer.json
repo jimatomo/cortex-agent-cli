@@ -1,0 +1,15 @@
+{
+  "name": "cagent",
+  "image": "mcr.microsoft.com/devcontainers/go:1.22",
+  "postCreateCommand": "go mod download",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "go.toolsManagement.autoUpdate": true
+      },
+      "extensions": [
+        "golang.Go"
+      ]
+    }
+  }
+}

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+      - run: go vet ./...
+      - run: go test ./...
+
+  integration:
+    if: ${{ secrets.SNOWFLAKE_ACCOUNT != '' && secrets.SNOWFLAKE_WIF_ROLE_ARN != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.SNOWFLAKE_WIF_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Run integration tests
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_AUTHENTICATOR: WORKLOAD_IDENTITY
+          SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER: AWS
+          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+          SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
+          SNOWFLAKE_OAUTH_TOKEN: ${{ secrets.SNOWFLAKE_OAUTH_TOKEN }}
+        run: go test -tags=integration ./...

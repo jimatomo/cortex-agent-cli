@@ -1,0 +1,25 @@
+deploy:
+  database: TEST_DB
+  schema: PUBLIC
+
+name: my-support-agent
+comment: Customer support agent
+profile:
+  display_name: Support Bot
+models:
+  orchestration: claude-4-sonnet
+instructions:
+  response: |
+    You are a helpful customer support agent.
+orchestration:
+  budget:
+    seconds: 60
+    tokens: 16000
+# tools:
+#   - tool_spec:
+#       type: cortex_search
+#       name: knowledge_search
+# tool_resources:
+#   cortex_search:
+#     - name: knowledge_search
+#       service: KNOWLEDGE_SERVICE
