@@ -27,20 +27,22 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22.x"
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.SNOWFLAKE_WIF_ROLE_ARN }}
-          aws-region: us-east-1
+          aws-region: ap-northeast-1
+
       - name: Run integration tests
         env:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_ROLE: ${{ env.SNOWFLAKE_ROLE }}
           SNOWFLAKE_AUTHENTICATOR: WORKLOAD_IDENTITY
           SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER: AWS
-          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
-          SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
-          SNOWFLAKE_OAUTH_TOKEN: ${{ secrets.SNOWFLAKE_OAUTH_TOKEN }}
+          SNOWFLAKE_DATABASE: ${{ env.SNOWFLAKE_DATABASE }}
+          SNOWFLAKE_SCHEMA: ${{ env.SNOWFLAKE_SCHEMA }}
         run: go test -tags=integration ./...
