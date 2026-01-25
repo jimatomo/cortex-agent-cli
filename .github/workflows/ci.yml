@@ -20,7 +20,6 @@ jobs:
       - run: go test ./...
 
   integration:
-    if: ${{ secrets.SNOWFLAKE_ACCOUNT != '' && secrets.SNOWFLAKE_WIF_ROLE_ARN != '' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
