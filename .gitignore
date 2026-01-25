@@ -8,6 +8,10 @@
 *.so
 *.dylib
 
+# Project binaries
+cagent
+coragent
+
 # Test binary, built with `go test -c`
 *.test
 
@@ -24,14 +28,34 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# GoReleaser output
+dist/
+
+# Environment and secrets - NEVER commit these
 .env
+.env.*
+.env.local
+.env.*.local
+*.pem
+*.key
+!*_test.pem
+!*_test.key
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Claude Code
+.claude/
 
 # Go build cache
 .gocache/
 .gomodcache/
 .gopath/
+
+# OS files
+.DS_Store
+Thumbs.db
