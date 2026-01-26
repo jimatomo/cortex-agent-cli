@@ -85,6 +85,8 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 			// Show detailed plan output
 			for _, item := range planItems {
 				fmt.Fprintf(os.Stdout, "%s:\n", item.Parsed.Spec.Name)
+				fmt.Fprintf(os.Stdout, "  database: %s\n", item.Target.Database)
+				fmt.Fprintf(os.Stdout, "  schema:   %s\n", item.Target.Schema)
 				if !item.Exists {
 					color.New(color.FgGreen).Fprintln(os.Stdout, "  + create")
 					// Show what will be created

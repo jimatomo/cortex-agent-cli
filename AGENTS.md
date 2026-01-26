@@ -95,6 +95,12 @@ Configured via environment variables:
 - `SNOWFLAKE_PRIVATE_KEY_PATH` - RSA private key file
 - `SNOWFLAKE_AUTHENTICATOR` - `KEYPAIR` (default) or `WORKLOAD_IDENTITY`
 
+Read local authentication variables
+
+```bash
+source .env
+```
+
 ## Important Conventions
 
 ### YAML Validation

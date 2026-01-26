@@ -52,6 +52,8 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 				}
 
 				fmt.Fprintf(os.Stdout, "%s:\n", item.Spec.Name)
+				fmt.Fprintf(os.Stdout, "  database: %s\n", target.Database)
+				fmt.Fprintf(os.Stdout, "  schema:   %s\n", target.Schema)
 				if !exists {
 					createCount++
 					color.New(color.FgGreen).Fprintln(os.Stdout, "  + create")
