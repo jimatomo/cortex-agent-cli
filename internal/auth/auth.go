@@ -35,6 +35,21 @@ type Config struct {
 }
 
 func FromEnv() Config {
+	authenticator := envOrDefault("SNOWFLAKE_AUTHENTICATOR", AuthenticatorKeyPair)
+	provider := os.Getenv("SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER")
+	oauthToken := firstEnv("SNOWFLAKE_OAUTH_TOKEN", "SNOWFLAKE_TOKEN", "SNOWFLAKE_ACCESS_TOKEN")
+
+	// For AWS WIF, try to read token from AWS_WEB_IDENTITY_TOKEN_FILE if not explicitly set
+	if oauthToken == "" &&
+		strings.ToUpper(authenticator) == AuthenticatorWorkloadIdentity &&
+		strings.ToUpper(provider) == "AWS" {
+		if tokenFile := os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE"); tokenFile != "" {
+			if data, err := os.ReadFile(tokenFile); err == nil {
+				oauthToken = strings.TrimSpace(string(data))
+			}
+		}
+	}
+
 	return Config{
 		Account:                  os.Getenv("SNOWFLAKE_ACCOUNT"),
 		User:                     os.Getenv("SNOWFLAKE_USER"),
@@ -42,9 +57,9 @@ func FromEnv() Config {
 		Warehouse:                os.Getenv("SNOWFLAKE_WAREHOUSE"),
 		PrivateKey:               os.Getenv("SNOWFLAKE_PRIVATE_KEY"),
 		PrivateKeyPassphrase:     os.Getenv("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE"),
-		Authenticator:            envOrDefault("SNOWFLAKE_AUTHENTICATOR", AuthenticatorKeyPair),
-		WorkloadIdentityProvider: os.Getenv("SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER"),
-		OAuthToken:               firstEnv("SNOWFLAKE_OAUTH_TOKEN", "SNOWFLAKE_TOKEN", "SNOWFLAKE_ACCESS_TOKEN"),
+		Authenticator:            authenticator,
+		WorkloadIdentityProvider: provider,
+		OAuthToken:               oauthToken,
 	}
 }
 
