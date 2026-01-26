@@ -39,9 +39,9 @@ jobs:
       - name: Run integration tests
         env:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_ROLE: ${{ env.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_ROLE: ${{ env.SNOWFLAKE_ROLE, 'CORAGENT_ROLE' }}
           SNOWFLAKE_AUTHENTICATOR: WORKLOAD_IDENTITY
           SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER: AWS
-          SNOWFLAKE_DATABASE: ${{ env.SNOWFLAKE_DATABASE }}
-          SNOWFLAKE_SCHEMA: ${{ env.SNOWFLAKE_SCHEMA }}
+          SNOWFLAKE_DATABASE: ${{ env.SNOWFLAKE_DATABASE, 'TEST_DB' }}
+          SNOWFLAKE_SCHEMA: ${{ env.SNOWFLAKE_SCHEMA, 'PUBLIC' }}
         run: go test -tags=integration -v ./...
