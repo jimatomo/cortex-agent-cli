@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,13 +15,34 @@ import (
 )
 
 // testConfig returns auth.Config populated from environment variables.
-// Skips the test if required environment variables are not set.
+// Skips the test if required environment variables are not set or authentication is not properly configured.
 func testConfig(t *testing.T) auth.Config {
 	t.Helper()
 	cfg := auth.FromEnv()
 	if cfg.Account == "" {
 		t.Skip("SNOWFLAKE_ACCOUNT not set; skipping integration test")
 	}
+
+	ctx := context.Background()
+
+	// Validate authentication is properly configured
+	authType := strings.ToUpper(strings.TrimSpace(cfg.Authenticator))
+	if authType == "" || authType == auth.AuthenticatorKeyPair {
+		if cfg.User == "" || cfg.PrivateKey == "" {
+			t.Skip("Key pair authentication not fully configured; skipping integration test")
+		}
+	} else if authType == auth.AuthenticatorWorkloadIdentity {
+		provider := strings.ToUpper(cfg.WorkloadIdentityProvider)
+		if provider == "AWS" {
+			// For AWS WIF, check if AWS credentials are available
+			if !auth.IsAWSEnvironment(ctx) {
+				t.Skip("AWS WIF configured but no AWS credentials available; skipping integration test")
+			}
+		} else if cfg.OAuthToken == "" {
+			t.Skip("WIF authentication configured but no OAuth token available; skipping integration test")
+		}
+	}
+
 	return cfg
 }
 

@@ -8,7 +8,7 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 - Plan/Apply workflow with diff detection (PUT update only when changed)
 - Validate YAML schema (unknown fields rejected)
 - Export existing agents to YAML
-- Supports Key Pair auth and Workload Identity Federation
+- Supports Key Pair authentication and Workload Identity Federation (AWS IAM roles)
 
 ## Requirements
 
@@ -40,21 +40,42 @@ go build -o coragent ./cmd/coragent
 export SNOWFLAKE_ACCOUNT=your_account
 export SNOWFLAKE_USER=your_user
 export SNOWFLAKE_ROLE=CORTEX_USER
-export SNOWFLAKE_PRIVATE_KEY_PATH=/path/to/rsa_key.p8
+# Provide the private key contents directly (PEM or base64-encoded PEM)
+export SNOWFLAKE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----
+...
+-----END PRIVATE KEY-----"
 # If the private key is encrypted, also set the passphrase
 # export SNOWFLAKE_PRIVATE_KEY_PASSPHRASE=your_passphrase
-# or provide the key contents directly (PEM or base64-encoded PEM)
-# export SNOWFLAKE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
 ```
 
-**Workload Identity Federation**
+**Workload Identity Federation (AWS IAM Roles)**
+
+> **Note:** Currently, only AWS IAM roles are supported for Workload Identity Federation.
 
 ```bash
 export SNOWFLAKE_ACCOUNT=your_account
 export SNOWFLAKE_ROLE=CORTEX_USER
 export SNOWFLAKE_AUTHENTICATOR=WORKLOAD_IDENTITY
-export SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER=AWS  # AWS | AZURE | GCP
-export SNOWFLAKE_OAUTH_TOKEN=<federated_oauth_token>
+export SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER=AWS
+# AWS credentials are automatically retrieved from the environment
+# (IAM role, environment variables, EC2 instance profile, ECS task role, etc.)
+```
+
+For GitHub Actions with OIDC:
+
+```yaml
+- uses: aws-actions/configure-aws-credentials@v4
+  with:
+    role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+    aws-region: your-region
+
+- name: Deploy agents
+  env:
+    SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+    SNOWFLAKE_ROLE: CORTEX_USER
+    SNOWFLAKE_AUTHENTICATOR: WORKLOAD_IDENTITY
+    SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER: AWS
+  run: coragent apply
 ```
 
 ### 2) Define an agent in YAML

@@ -35,21 +35,6 @@ type Config struct {
 }
 
 func FromEnv() Config {
-	authenticator := envOrDefault("SNOWFLAKE_AUTHENTICATOR", AuthenticatorKeyPair)
-	provider := os.Getenv("SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER")
-	oauthToken := firstEnv("SNOWFLAKE_OAUTH_TOKEN", "SNOWFLAKE_TOKEN", "SNOWFLAKE_ACCESS_TOKEN")
-
-	// For AWS WIF, try to read token from AWS_WEB_IDENTITY_TOKEN_FILE if not explicitly set
-	if oauthToken == "" &&
-		strings.ToUpper(authenticator) == AuthenticatorWorkloadIdentity &&
-		strings.ToUpper(provider) == "AWS" {
-		if tokenFile := os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE"); tokenFile != "" {
-			if data, err := os.ReadFile(tokenFile); err == nil {
-				oauthToken = strings.TrimSpace(string(data))
-			}
-		}
-	}
-
 	return Config{
 		Account:                  os.Getenv("SNOWFLAKE_ACCOUNT"),
 		User:                     os.Getenv("SNOWFLAKE_USER"),
@@ -57,9 +42,9 @@ func FromEnv() Config {
 		Warehouse:                os.Getenv("SNOWFLAKE_WAREHOUSE"),
 		PrivateKey:               os.Getenv("SNOWFLAKE_PRIVATE_KEY"),
 		PrivateKeyPassphrase:     os.Getenv("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE"),
-		Authenticator:            authenticator,
-		WorkloadIdentityProvider: provider,
-		OAuthToken:               oauthToken,
+		Authenticator:            envOrDefault("SNOWFLAKE_AUTHENTICATOR", AuthenticatorKeyPair),
+		WorkloadIdentityProvider: os.Getenv("SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER"),
+		OAuthToken:               firstEnv("SNOWFLAKE_OAUTH_TOKEN", "SNOWFLAKE_TOKEN", "SNOWFLAKE_ACCESS_TOKEN"),
 	}
 }
 
@@ -71,7 +56,7 @@ func AuthHeader(ctx context.Context, cfg Config) (string, error) {
 	return "Bearer " + token, nil
 }
 
-func BearerToken(_ context.Context, cfg Config) (string, error) {
+func BearerToken(ctx context.Context, cfg Config) (string, error) {
 	auth := strings.ToUpper(strings.TrimSpace(cfg.Authenticator))
 	if auth == "" {
 		auth = AuthenticatorKeyPair
@@ -81,12 +66,32 @@ func BearerToken(_ context.Context, cfg Config) (string, error) {
 	case AuthenticatorKeyPair:
 		return keyPairJWT(cfg)
 	case AuthenticatorWorkloadIdentity:
+		return workloadIdentityToken(ctx, cfg)
+	default:
+		return "", fmt.Errorf("unsupported authenticator: %s", cfg.Authenticator)
+	}
+}
+
+// workloadIdentityToken returns a token for Workload Identity Federation.
+// For AWS provider, it generates a signed STS GetCallerIdentity attestation.
+// For other providers, it uses the OAuth token directly.
+func workloadIdentityToken(ctx context.Context, cfg Config) (string, error) {
+	provider := strings.ToUpper(strings.TrimSpace(cfg.WorkloadIdentityProvider))
+
+	switch provider {
+	case "AWS":
+		// For AWS WIF, generate attestation from AWS credentials
+		token, err := getAWSWIFToken(ctx)
+		if err != nil {
+			return "", fmt.Errorf("AWS WIF authentication: %w", err)
+		}
+		return token, nil
+	default:
+		// For other providers, use OAuth token directly
 		if cfg.OAuthToken == "" {
 			return "", fmt.Errorf("missing OAuth token for Workload Identity Federation (set SNOWFLAKE_OAUTH_TOKEN)")
 		}
 		return cfg.OAuthToken, nil
-	default:
-		return "", fmt.Errorf("unsupported authenticator: %s", cfg.Authenticator)
 	}
 }
 

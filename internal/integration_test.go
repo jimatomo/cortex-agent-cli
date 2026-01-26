@@ -38,6 +38,8 @@ func skipIfNotConfigured(t *testing.T) (auth.Config, string, string) {
 		t.Skip("SNOWFLAKE_SCHEMA not set; skipping integration test")
 	}
 
+	ctx := context.Background()
+
 	// Validate auth configuration
 	authType := strings.ToUpper(strings.TrimSpace(cfg.Authenticator))
 	if authType == "" || authType == auth.AuthenticatorKeyPair {
@@ -45,7 +47,12 @@ func skipIfNotConfigured(t *testing.T) (auth.Config, string, string) {
 			t.Skip("Key pair authentication not fully configured; skipping test")
 		}
 	} else if authType == auth.AuthenticatorWorkloadIdentity {
-		if cfg.OAuthToken == "" {
+		provider := strings.ToUpper(cfg.WorkloadIdentityProvider)
+		if provider == "AWS" {
+			if !auth.IsAWSEnvironment(ctx) {
+				t.Skip("AWS WIF configured but no AWS credentials available; skipping test")
+			}
+		} else if cfg.OAuthToken == "" {
 			t.Skip("WIF authentication configured but no OAuth token; skipping test")
 		}
 	}
