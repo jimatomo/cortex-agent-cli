@@ -27,7 +27,6 @@ type Config struct {
 	User                     string
 	Role                     string
 	Warehouse                string
-	PrivateKeyPath           string
 	PrivateKey               string
 	PrivateKeyPassphrase     string
 	Authenticator            string
@@ -41,7 +40,6 @@ func FromEnv() Config {
 		User:                     os.Getenv("SNOWFLAKE_USER"),
 		Role:                     os.Getenv("SNOWFLAKE_ROLE"),
 		Warehouse:                os.Getenv("SNOWFLAKE_WAREHOUSE"),
-		PrivateKeyPath:           os.Getenv("SNOWFLAKE_PRIVATE_KEY_PATH"),
 		PrivateKey:               os.Getenv("SNOWFLAKE_PRIVATE_KEY"),
 		PrivateKeyPassphrase:     os.Getenv("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE"),
 		Authenticator:            envOrDefault("SNOWFLAKE_AUTHENTICATOR", AuthenticatorKeyPair),
@@ -78,11 +76,11 @@ func BearerToken(_ context.Context, cfg Config) (string, error) {
 }
 
 func keyPairJWT(cfg Config) (string, error) {
-	if cfg.Account == "" || cfg.User == "" || (cfg.PrivateKeyPath == "" && strings.TrimSpace(cfg.PrivateKey) == "") {
-		return "", fmt.Errorf("missing required key pair auth settings (SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PRIVATE_KEY_PATH or SNOWFLAKE_PRIVATE_KEY)")
+	if cfg.Account == "" || cfg.User == "" || strings.TrimSpace(cfg.PrivateKey) == "" {
+		return "", fmt.Errorf("missing required key pair auth settings (SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PRIVATE_KEY)")
 	}
 
-	privateKey, publicKey, err := loadKeyPair(cfg.PrivateKeyPath, cfg.PrivateKey, cfg.PrivateKeyPassphrase)
+	privateKey, publicKey, err := loadKeyPair(cfg.PrivateKey, cfg.PrivateKeyPassphrase)
 	if err != nil {
 		return "", err
 	}
@@ -111,73 +109,41 @@ func keyPairJWT(cfg Config) (string, error) {
 	return signed, nil
 }
 
-func loadKeyPair(path, inline, passphrase string) (*rsa.PrivateKey, *rsa.PublicKey, error) {
+func loadKeyPair(inline, passphrase string) (*rsa.PrivateKey, *rsa.PublicKey, error) {
 	inline = strings.TrimSpace(inline)
-	if inline != "" {
-		// Common misconfiguration: user provides a file path via SNOWFLAKE_PRIVATE_KEY
-		// instead of SNOWFLAKE_PRIVATE_KEY_PATH. If the value looks like a path and
-		// is readable, treat it as a key file.
-		if looksLikePath(inline) {
-			if b, readErr := os.ReadFile(inline); readErr == nil {
-				if privKey, pubKey, err := parsePrivateKey(b, passphrase); err == nil {
-					return privKey, pubKey, nil
-				}
-			}
-		}
+	if inline == "" {
+		return nil, nil, fmt.Errorf("SNOWFLAKE_PRIVATE_KEY is required")
+	}
 
-		raw := strings.ReplaceAll(inline, "\\n", "\n")
-		data := []byte(raw)
-		privKey, pubKey, err := parsePrivateKey(data, passphrase)
-		if err == nil {
+	raw := strings.ReplaceAll(inline, "\\n", "\n")
+	data := []byte(raw)
+	privKey, pubKey, err := parsePrivateKey(data, passphrase)
+	if err == nil {
+		return privKey, pubKey, nil
+	}
+	// If PEM lines were indented (common in YAML), try de-indenting.
+	if normalized := normalizePEM(raw); normalized != raw {
+		if privKey, pubKey, normErr := parsePrivateKey([]byte(normalized), passphrase); normErr == nil {
 			return privKey, pubKey, nil
 		}
-		// If PEM lines were indented (common in YAML), try de-indenting.
-		if normalized := normalizePEM(raw); normalized != raw {
-			if privKey, pubKey, normErr := parsePrivateKey([]byte(normalized), passphrase); normErr == nil {
-				return privKey, pubKey, nil
-			}
+	}
+
+	trimmed := strings.TrimSpace(inline)
+	if decoded, decodeErr := base64.StdEncoding.DecodeString(trimmed); decodeErr == nil {
+		// First try base64-encoded PEM.
+		if privKey, pubKey, pemErr := parsePrivateKey(decoded, passphrase); pemErr == nil {
+			return privKey, pubKey, nil
 		}
-
-		trimmed := strings.TrimSpace(inline)
-		if decoded, decodeErr := base64.StdEncoding.DecodeString(trimmed); decodeErr == nil {
-			// First try base64-encoded PEM.
-			if privKey, pubKey, pemErr := parsePrivateKey(decoded, passphrase); pemErr == nil {
-				return privKey, pubKey, nil
-			}
-			// Also accept base64-encoded DER (PKCS#8 or PKCS#1).
-			if derKey, derErr := parsePrivateKeyDER(decoded); derErr == nil {
-				return derKey, derKey.Public().(*rsa.PublicKey), nil
-			}
+		// Also accept base64-encoded DER (PKCS#8 or PKCS#1).
+		if derKey, derErr := parsePrivateKeyDER(decoded); derErr == nil {
+			return derKey, derKey.Public().(*rsa.PublicKey), nil
 		}
-
-		return nil, nil, fmt.Errorf(
-			"invalid SNOWFLAKE_PRIVATE_KEY: %w (expected PEM like '-----BEGIN PRIVATE KEY-----' or base64-encoded PEM)",
-			err,
-		)
 	}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, nil, fmt.Errorf("read private key %q: %w", path, err)
-	}
-
-	privKey, pubKey, err := parsePrivateKey(data, passphrase)
-	if err != nil {
-		return nil, nil, fmt.Errorf("parse private key %q: %w", path, err)
-	}
-	return privKey, pubKey, nil
-}
-
-func looksLikePath(s string) bool {
-	// Heuristic: avoid treating inline PEM/base64 as a path.
-	if strings.Contains(s, "-----BEGIN") || strings.ContainsAny(s, "\n\r") {
-		return false
-	}
-	// Common key filename extensions and path markers.
-	if strings.Contains(s, "/") || strings.Contains(s, `\`) || strings.HasPrefix(s, ".") || strings.HasSuffix(s, ".pem") || strings.HasSuffix(s, ".p8") || strings.HasSuffix(s, ".key") {
-		return true
-	}
-	return false
+	return nil, nil, fmt.Errorf(
+		"invalid SNOWFLAKE_PRIVATE_KEY: %w (expected PEM like '-----BEGIN PRIVATE KEY-----' or base64-encoded PEM)",
+		err,
+	)
 }
 
 func normalizePEM(s string) string {
