@@ -1,12 +1,14 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -18,9 +20,8 @@ import (
 )
 
 const (
-	stsService          = "sts"
-	snowflakeAudience   = "snowflakecomputing.com"
-	getCallerIdentityV  = "2011-06-15"
+	stsService        = "sts"
+	snowflakeAudience = "snowflakecomputing.com"
 )
 
 // wifAttestation represents the attestation object for Snowflake WIF authentication.
@@ -68,21 +69,28 @@ func getAWSWIFToken(ctx context.Context) (string, error) {
 
 // createAWSAttestation creates a signed STS GetCallerIdentity request attestation.
 func createAWSAttestation(ctx context.Context, creds aws.Credentials, region string) (*wifAttestation, error) {
-	// Build STS GetCallerIdentity URL
-	stsURL := fmt.Sprintf("https://sts.%s.amazonaws.com/?Action=GetCallerIdentity&Version=%s", region, getCallerIdentityV)
+	// STS endpoint URL (without query parameters for POST)
+	stsHost := fmt.Sprintf("sts.%s.amazonaws.com", region)
+	stsURL := fmt.Sprintf("https://%s/", stsHost)
 
-	// Create the request
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stsURL, nil)
+	// Request body for GetCallerIdentity
+	body := []byte("Action=GetCallerIdentity&Version=2011-06-15")
+
+	// Create the request with body
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stsURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create STS request: %w", err)
 	}
+
+	// Set Host explicitly
+	req.Host = stsHost
 
 	// Set required headers
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("X-Snowflake-Audience", snowflakeAudience)
 
-	// Calculate payload hash (empty body)
-	payloadHash := sha256.Sum256([]byte{})
+	// Calculate payload hash for the body
+	payloadHash := sha256.Sum256(body)
 	payloadHashHex := hex.EncodeToString(payloadHash[:])
 
 	// Sign the request using AWS Signature Version 4
@@ -95,14 +103,17 @@ func createAWSAttestation(ctx context.Context, creds aws.Credentials, region str
 	}
 
 	// Extract signed headers for attestation
+	// Include all headers that the signer set
 	headers := make(map[string]string)
 	for key := range req.Header {
-		// Include all headers that were set
 		headers[key] = req.Header.Get(key)
 	}
 
-	// Also include Host header
-	headers["Host"] = req.Host
+	// Ensure Host header is included
+	headers["Host"] = stsHost
+
+	// Reset body reader for potential use
+	req.Body = io.NopCloser(bytes.NewReader(body))
 
 	return &wifAttestation{
 		URL:     stsURL,
