@@ -261,21 +261,21 @@ func TestIntegration_InvalidKeyPairAuth(t *testing.T) {
 	}
 }
 
-// TestIntegration_WorkloadIdentityMissingToken tests WIF error when token is missing.
+// TestIntegration_WorkloadIdentityMissingToken tests WIF error when token is missing for non-AWS providers.
 func TestIntegration_WorkloadIdentityMissingToken(t *testing.T) {
+	// Test with a non-AWS provider that requires OAuth token
 	cfg := Config{
 		Account:                  "testaccount",
 		Authenticator:            AuthenticatorWorkloadIdentity,
-		WorkloadIdentityProvider: "AWS",
-		OAuthToken:               "", // Missing token
+		WorkloadIdentityProvider: "GCP", // Non-AWS provider requires OAuth token
+		OAuthToken:               "",    // Missing token
 	}
 
 	ctx := context.Background()
 	_, err := BearerToken(ctx, cfg)
 	if err == nil {
-		t.Error("Expected error for WIF without token")
-	}
-	if !strings.Contains(err.Error(), "OAuth token") {
+		t.Error("Expected error for WIF without token (non-AWS provider)")
+	} else if !strings.Contains(err.Error(), "OAuth token") {
 		t.Errorf("Error should mention OAuth token: %v", err)
 	}
 }

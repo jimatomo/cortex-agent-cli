@@ -18,12 +18,13 @@ import (
 )
 
 type Client struct {
-	baseURL   *url.URL
-	role      string
-	userAgent string
-	http      *http.Client
-	authCfg   auth.Config
-	debug     bool
+	baseURL      *url.URL
+	role         string
+	userAgent    string
+	http         *http.Client
+	authCfg      auth.Config
+	sessionToken *auth.SessionToken
+	debug        bool
 }
 
 type APIError struct {
@@ -74,13 +75,22 @@ func NewClientWithDebug(cfg auth.Config, debug bool) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse base url: %w", err)
 	}
+
+	// Login to get session token
+	ctx := context.Background()
+	sessionToken, err := auth.Login(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("login failed: %w", err)
+	}
+
 	return &Client{
-		baseURL:   base,
-		role:      strings.ToUpper(strings.TrimSpace(cfg.Role)),
-		userAgent: "coragent",
-		http:      &http.Client{Timeout: 60 * time.Second},
-		authCfg:   cfg,
-		debug:     debug,
+		baseURL:      base,
+		role:         strings.ToUpper(strings.TrimSpace(cfg.Role)),
+		userAgent:    "coragent",
+		http:         &http.Client{Timeout: 60 * time.Second},
+		authCfg:      cfg,
+		sessionToken: sessionToken,
+		debug:        debug,
 	}, nil
 }
 
@@ -324,11 +334,8 @@ func (c *Client) doJSON(ctx context.Context, method, urlStr string, payload any,
 		return fmt.Errorf("create request: %w", err)
 	}
 
-	authHeader, err := auth.AuthHeader(ctx, c.authCfg)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", authHeader)
+	// Use session token for authorization
+	req.Header.Set("Authorization", "Snowflake Token=\""+c.sessionToken.Token+"\"")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
 	if payload != nil {
