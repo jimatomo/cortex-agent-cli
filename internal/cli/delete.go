@@ -25,6 +25,7 @@ type deleteItem struct {
 
 func newDeleteCmd(opts *RootOptions) *cobra.Command {
 	var autoApprove bool
+	var recursive bool
 	cmd := &cobra.Command{
 		Use:   "delete [path]",
 		Short: "Delete agents defined in YAML files",
@@ -35,7 +36,7 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 				path = args[0]
 			}
 
-			specs, err := agent.LoadAgents(path)
+			specs, err := agent.LoadAgents(path, recursive)
 			if err != nil {
 				return err
 			}
@@ -123,6 +124,7 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&autoApprove, "yes", false, "Skip confirmation prompt")
+	cmd.Flags().BoolVarP(&recursive, "recursive", "R", false, "Recursively load agents from subdirectories")
 	return cmd
 }
 

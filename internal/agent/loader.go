@@ -19,7 +19,8 @@ type ParsedAgent struct {
 
 // LoadAgents loads agent specs from a file or directory.
 // If path is empty, it defaults to the current directory.
-func LoadAgents(path string) ([]ParsedAgent, error) {
+// If recursive is true and path is a directory, it will recursively load from subdirectories.
+func LoadAgents(path string, recursive bool) ([]ParsedAgent, error) {
 	if strings.TrimSpace(path) == "" {
 		path = "."
 	}
@@ -30,7 +31,7 @@ func LoadAgents(path string) ([]ParsedAgent, error) {
 	}
 
 	if info.IsDir() {
-		return loadFromDir(path)
+		return loadFromDir(path, recursive)
 	}
 
 	spec, err := loadFromFile(path)
@@ -40,23 +41,40 @@ func LoadAgents(path string) ([]ParsedAgent, error) {
 	return []ParsedAgent{{Path: path, Spec: spec}}, nil
 }
 
-func loadFromDir(dir string) ([]ParsedAgent, error) {
+func loadFromDir(dir string, recursive bool) ([]ParsedAgent, error) {
 	var files []string
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
+	if recursive {
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if d.IsDir() {
+				return nil
+			}
+			if isYAML(path) {
+				files = append(files, path)
+			}
 			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("walk directory %q: %w", dir, err)
 		}
-		if isYAML(path) {
-			files = append(files, path)
+	} else {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, fmt.Errorf("read directory %q: %w", dir, err)
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walk directory %q: %w", dir, err)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			if isYAML(path) {
+				files = append(files, path)
+			}
+		}
 	}
+
 	sort.Strings(files)
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no YAML files found in %q", dir)

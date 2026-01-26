@@ -9,6 +9,7 @@ import (
 )
 
 func newValidateCmd(_ *RootOptions) *cobra.Command {
+	var recursive bool
 	cmd := &cobra.Command{
 		Use:   "validate [path]",
 		Short: "Validate YAML files without applying",
@@ -19,7 +20,7 @@ func newValidateCmd(_ *RootOptions) *cobra.Command {
 				path = args[0]
 			}
 
-			specs, err := agent.LoadAgents(path)
+			specs, err := agent.LoadAgents(path, recursive)
 			if err != nil {
 				return err
 			}
@@ -30,5 +31,6 @@ func newValidateCmd(_ *RootOptions) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVarP(&recursive, "recursive", "R", false, "Recursively load agents from subdirectories")
 	return cmd
 }

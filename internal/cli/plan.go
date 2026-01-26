@@ -16,6 +16,7 @@ import (
 )
 
 func newPlanCmd(opts *RootOptions) *cobra.Command {
+	var recursive bool
 	cmd := &cobra.Command{
 		Use:   "plan [path]",
 		Short: "Show execution plan without applying changes",
@@ -26,7 +27,7 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 				path = args[0]
 			}
 
-			specs, err := agent.LoadAgents(path)
+			specs, err := agent.LoadAgents(path, recursive)
 			if err != nil {
 				return err
 			}
@@ -97,6 +98,7 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVarP(&recursive, "recursive", "R", false, "Recursively load agents from subdirectories")
 	return cmd
 }
 
@@ -130,9 +132,9 @@ func formatValue(v any) string {
 
 func applyAuthOverrides(cfg *auth.Config, opts *RootOptions) {
 	if strings.TrimSpace(opts.Account) != "" {
-		cfg.Account = strings.TrimSpace(opts.Account)
+		cfg.Account = strings.ToUpper(strings.TrimSpace(opts.Account))
 	}
 	if strings.TrimSpace(opts.Role) != "" {
-		cfg.Role = strings.TrimSpace(opts.Role)
+		cfg.Role = strings.ToUpper(strings.TrimSpace(opts.Role))
 	}
 }

@@ -76,7 +76,7 @@ func NewClientWithDebug(cfg auth.Config, debug bool) (*Client, error) {
 	}
 	return &Client{
 		baseURL:   base,
-		role:      cfg.Role,
+		role:      strings.ToUpper(strings.TrimSpace(cfg.Role)),
 		userAgent: "coragent",
 		http:      &http.Client{Timeout: 60 * time.Second},
 		authCfg:   cfg,
