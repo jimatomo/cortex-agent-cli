@@ -123,7 +123,7 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&autoApprove, "yes", false, "Skip confirmation prompt")
+	cmd.Flags().BoolVarP(&autoApprove, "yes", "y", false, "Skip confirmation prompt")
 	cmd.Flags().BoolVarP(&recursive, "recursive", "R", false, "Recursively load agents from subdirectories")
 	return cmd
 }
