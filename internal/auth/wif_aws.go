@@ -66,15 +66,15 @@ func getAWSWIFToken(ctx context.Context) (string, error) {
 }
 
 // createAWSAttestation creates a signed STS GetCallerIdentity request attestation.
-// Uses GET request with query parameters as expected by Snowflake WIF.
+// Uses POST request with global STS endpoint as required by Snowflake WIF.
 // Note: region parameter is kept for potential future use but global STS endpoint is used.
 func createAWSAttestation(ctx context.Context, creds aws.Credentials, _ string) (*wifAttestation, error) {
-	// Use global STS endpoint with query parameters for GET request
+	// Use global STS endpoint with query parameters
 	stsHost := "sts.amazonaws.com"
 	stsURL := fmt.Sprintf("https://%s/?Action=GetCallerIdentity&Version=2011-06-15", stsHost)
 
-	// Create a GET request (no body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, stsURL, nil)
+	// Create a POST request with empty body
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stsURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create STS request: %w", err)
 	}
@@ -82,10 +82,11 @@ func createAWSAttestation(ctx context.Context, creds aws.Credentials, _ string) 
 	// Set Host explicitly
 	req.Host = stsHost
 
-	// Set Snowflake audience header
+	// Set required headers
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("X-Snowflake-Audience", snowflakeAudience)
 
-	// Calculate payload hash (empty body for GET request)
+	// Calculate payload hash (empty body)
 	payloadHash := sha256.Sum256([]byte{})
 	payloadHashHex := hex.EncodeToString(payloadHash[:])
 
@@ -110,7 +111,7 @@ func createAWSAttestation(ctx context.Context, creds aws.Credentials, _ string) 
 
 	return &wifAttestation{
 		URL:     stsURL,
-		Method:  http.MethodGet,
+		Method:  http.MethodPost,
 		Headers: headers,
 	}, nil
 }
