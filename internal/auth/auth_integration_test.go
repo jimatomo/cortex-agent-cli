@@ -93,54 +93,6 @@ func TestIntegration_KeyPairAuth(t *testing.T) {
 	t.Logf("Successfully generated JWT for %s", subject)
 }
 
-// TestIntegration_WorkloadIdentityAuth tests Workload Identity Federation authentication.
-// For AWS WIF, it generates attestation from AWS credentials automatically.
-func TestIntegration_WorkloadIdentityAuth(t *testing.T) {
-	authenticator := os.Getenv("SNOWFLAKE_AUTHENTICATOR")
-	if strings.ToUpper(authenticator) != AuthenticatorWorkloadIdentity {
-		t.Skip("Workload Identity authentication not configured; skipping test")
-	}
-
-	if os.Getenv("SNOWFLAKE_ACCOUNT") == "" {
-		t.Skip("SNOWFLAKE_ACCOUNT not set; skipping test")
-	}
-
-	provider := strings.ToUpper(os.Getenv("SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER"))
-
-	// For AWS WIF, check if AWS credentials are available
-	if provider == "AWS" {
-		ctx := context.Background()
-		if !isAWSEnvironment(ctx) {
-			t.Skip("AWS credentials not available; skipping test")
-		}
-	} else {
-		// For non-AWS providers, check for OAuth token
-		oauthToken := firstEnv("SNOWFLAKE_OAUTH_TOKEN", "SNOWFLAKE_TOKEN", "SNOWFLAKE_ACCESS_TOKEN")
-		if oauthToken == "" {
-			t.Skip("No OAuth token available for WIF; skipping test")
-		}
-	}
-
-	cfg := Config{
-		Account:                  os.Getenv("SNOWFLAKE_ACCOUNT"),
-		Authenticator:            AuthenticatorWorkloadIdentity,
-		WorkloadIdentityProvider: provider,
-		OAuthToken:               firstEnv("SNOWFLAKE_OAUTH_TOKEN", "SNOWFLAKE_TOKEN", "SNOWFLAKE_ACCESS_TOKEN"),
-	}
-
-	ctx := context.Background()
-	token, err := BearerToken(ctx, cfg)
-	if err != nil {
-		t.Fatalf("BearerToken: %v", err)
-	}
-
-	if token == "" {
-		t.Fatal("BearerToken returned empty token")
-	}
-
-	t.Logf("Successfully generated WIF token (provider: %s, token length: %d)", cfg.WorkloadIdentityProvider, len(token))
-}
-
 // TestIntegration_AuthHeader tests the full auth header generation.
 func TestIntegration_AuthHeader(t *testing.T) {
 	cfg := FromEnv()
@@ -149,26 +101,12 @@ func TestIntegration_AuthHeader(t *testing.T) {
 		t.Skip("SNOWFLAKE_ACCOUNT not set; skipping test")
 	}
 
-	ctx := context.Background()
-
-	// Validate authentication is properly configured
-	auth := strings.ToUpper(strings.TrimSpace(cfg.Authenticator))
-	if auth == "" || auth == AuthenticatorKeyPair {
-		if cfg.User == "" || cfg.PrivateKey == "" {
-			t.Skip("Key pair authentication not fully configured; skipping test")
-		}
-	} else if auth == AuthenticatorWorkloadIdentity {
-		provider := strings.ToUpper(cfg.WorkloadIdentityProvider)
-		if provider == "AWS" {
-			if !isAWSEnvironment(ctx) {
-				t.Skip("AWS WIF configured but no AWS credentials available; skipping test")
-			}
-			t.Logf("Using AWS WIF authentication")
-		} else if cfg.OAuthToken == "" {
-			t.Skip("WIF authentication configured but no OAuth token available; skipping test")
-		}
+	// Key pair authentication requires user and private key
+	if cfg.User == "" || cfg.PrivateKey == "" {
+		t.Skip("Key pair authentication not fully configured; skipping test")
 	}
 
+	ctx := context.Background()
 	header, err := AuthHeader(ctx, cfg)
 	if err != nil {
 		t.Fatalf("AuthHeader: %v", err)
@@ -258,25 +196,6 @@ func TestIntegration_InvalidKeyPairAuth(t *testing.T) {
 				t.Errorf("Unexpected error: %v", err)
 			}
 		})
-	}
-}
-
-// TestIntegration_WorkloadIdentityMissingToken tests WIF error when token is missing for non-AWS providers.
-func TestIntegration_WorkloadIdentityMissingToken(t *testing.T) {
-	// Test with a non-AWS provider that requires OAuth token
-	cfg := Config{
-		Account:                  "testaccount",
-		Authenticator:            AuthenticatorWorkloadIdentity,
-		WorkloadIdentityProvider: "GCP", // Non-AWS provider requires OAuth token
-		OAuthToken:               "",    // Missing token
-	}
-
-	ctx := context.Background()
-	_, err := BearerToken(ctx, cfg)
-	if err == nil {
-		t.Error("Expected error for WIF without token (non-AWS provider)")
-	} else if !strings.Contains(err.Error(), "OAuth token") {
-		t.Errorf("Error should mention OAuth token: %v", err)
 	}
 }
 

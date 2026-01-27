@@ -67,7 +67,6 @@ func Login(ctx context.Context, cfg Config) (*SessionToken, error) {
 	}
 
 	var token string
-	var provider string
 	var err error
 
 	switch auth {
@@ -76,24 +75,11 @@ func Login(ctx context.Context, cfg Config) (*SessionToken, error) {
 		if err != nil {
 			return nil, err
 		}
-	case AuthenticatorWorkloadIdentity:
-		provider = strings.ToUpper(strings.TrimSpace(cfg.WorkloadIdentityProvider))
-		if provider == "AWS" {
-			token, err = getAWSWIFToken(ctx)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			if cfg.OAuthToken == "" {
-				return nil, fmt.Errorf("missing OAuth token for Workload Identity Federation")
-			}
-			token = cfg.OAuthToken
-		}
 	default:
 		return nil, fmt.Errorf("unsupported authenticator: %s", cfg.Authenticator)
 	}
 
-	return doLogin(ctx, cfg, auth, token, provider)
+	return doLogin(ctx, cfg, auth, token, "")
 }
 
 // doLogin performs the actual login request to Snowflake.

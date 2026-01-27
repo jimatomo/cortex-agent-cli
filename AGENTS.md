@@ -11,7 +11,7 @@ This file provides guidance for AI agents (like Claude Code) working on this cod
 - Plan/Apply workflow with diff detection
 - YAML schema validation with strict unknown field rejection
 - Export existing agents to YAML
-- Dual authentication: Key Pair (RSA) and Workload Identity Federation
+- Key Pair (RSA JWT) authentication
 - Multi-platform binaries (Linux, macOS, Windows)
 
 ## Project Structure
@@ -22,7 +22,7 @@ cortex-agent-cli/
 ├── internal/
 │   ├── agent/              # AgentSpec models and YAML loader
 │   ├── api/                # Snowflake REST API client
-│   ├── auth/               # JWT signing and WIF token handling
+│   ├── auth/               # JWT signing for Key Pair authentication
 │   ├── cli/                # Cobra command implementations
 │   ├── diff/               # Change detection algorithm
 │   └── plan/               # (Currently unused)
@@ -77,7 +77,7 @@ go mod tidy
 |---------|----------------|
 | `internal/agent` | AgentSpec struct definitions, YAML file loading with strict validation |
 | `internal/api` | HTTP client for Snowflake REST API (CRUD operations, response parsing) |
-| `internal/auth` | Authentication (JWT generation for key pair, OAuth for WIF) |
+| `internal/auth` | Authentication (JWT generation for key pair) |
 | `internal/cli` | Command implementations (plan, apply, validate, export) |
 | `internal/diff` | Recursive comparison of local vs. remote AgentSpec |
 
