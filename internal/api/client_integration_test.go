@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -23,24 +22,9 @@ func testConfig(t *testing.T) auth.Config {
 		t.Skip("SNOWFLAKE_ACCOUNT not set; skipping integration test")
 	}
 
-	ctx := context.Background()
-
-	// Validate authentication is properly configured
-	authType := strings.ToUpper(strings.TrimSpace(cfg.Authenticator))
-	if authType == "" || authType == auth.AuthenticatorKeyPair {
-		if cfg.User == "" || cfg.PrivateKey == "" {
-			t.Skip("Key pair authentication not fully configured; skipping integration test")
-		}
-	} else if authType == auth.AuthenticatorWorkloadIdentity {
-		provider := strings.ToUpper(cfg.WorkloadIdentityProvider)
-		if provider == "AWS" {
-			// For AWS WIF, check if AWS credentials are available
-			if !auth.IsAWSEnvironment(ctx) {
-				t.Skip("AWS WIF configured but no AWS credentials available; skipping integration test")
-			}
-		} else if cfg.OAuthToken == "" {
-			t.Skip("WIF authentication configured but no OAuth token available; skipping integration test")
-		}
+	// Key pair authentication requires user and private key
+	if cfg.User == "" || cfg.PrivateKey == "" {
+		t.Skip("Key pair authentication not fully configured; skipping integration test")
 	}
 
 	return cfg
