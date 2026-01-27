@@ -298,6 +298,7 @@ func TestIntegration_AgentWithTools(t *testing.T) {
 			{
 				ToolSpec: map[string]any{
 					"type": "code_execution",
+					"name": "code_exec",
 				},
 			},
 		},
