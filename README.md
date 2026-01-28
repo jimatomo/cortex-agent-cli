@@ -18,9 +18,34 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 
 ## Install
 
-### From GitHub Releases
+### Quick Install (Recommended)
 
-Download the appropriate binary from GitHub Releases and place it in your `$PATH`.
+```bash
+curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh
+```
+
+Options:
+
+```bash
+# Install specific version
+curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- -v v0.1.0
+
+# Install to custom directory (e.g., /usr/local/bin)
+curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- -d /usr/local/bin
+
+# Force reinstall (even if same version exists)
+curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- --force
+```
+
+The script automatically:
+- Detects your OS (macOS/Linux) and architecture (amd64/arm64)
+- Downloads the latest release from GitHub
+- Verifies checksum for security
+- Installs to `~/.local/bin` by default
+
+### Manual Download
+
+Download the appropriate binary from [GitHub Releases](https://github.com/jimatomo/cortex-agent-cli/releases) and place it in your `$PATH`.
 
 ### From Source
 
