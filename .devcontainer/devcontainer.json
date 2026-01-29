@@ -1,5 +1,5 @@
 {
-  "name": "cagent",
+  "name": "coragent",
   "image": "mcr.microsoft.com/devcontainers/go:1.23",
   "postCreateCommand": "go mod download",
   "customizations": {

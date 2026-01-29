@@ -45,7 +45,7 @@ cortex-agent-cli/
 ### Building
 
 ```bash
-go build -o cagent ./cmd/coragent
+go build -o coragent ./cmd/coragent
 ```
 
 ### Running Tests
@@ -117,7 +117,7 @@ source .env
 
 ### Binary Name
 - Module name: `coragent`
-- Binary name: `cagent` (configured in .goreleaser.yaml)
+- Binary name: `coragent` (configured in .goreleaser.yaml)
 
 ## Testing Patterns
 

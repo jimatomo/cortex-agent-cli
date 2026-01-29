@@ -21,7 +21,7 @@ var DebugEnabled bool
 func NewRootCmd() *cobra.Command {
 	opts := &RootOptions{}
 	cmd := &cobra.Command{
-		Use:           "cagent",
+		Use:           "coragent",
 		Short:         "CLI for managing Snowflake Cortex Agents",
 		SilenceUsage:  true,
 		SilenceErrors: true,
