@@ -11,6 +11,11 @@ builds:
     binary: coragent
     env:
       - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X coragent/internal/cli.Version={{.Version}}
+      - -X coragent/internal/cli.Commit={{.Commit}}
+      - -X coragent/internal/cli.Date={{.Date}}
     goos:
       - linux
       - darwin
