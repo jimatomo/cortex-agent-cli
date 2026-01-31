@@ -11,7 +11,8 @@
         "go.toolsManagement.autoUpdate": true
       },
       "extensions": [
-        "golang.Go"
+        "golang.Go",
+        "graphite.gti-vscode"
       ]
     }
   }
