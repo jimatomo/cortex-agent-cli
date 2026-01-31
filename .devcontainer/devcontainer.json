@@ -1,6 +1,9 @@
 {
   "name": "coragent",
-  "image": "mcr.microsoft.com/devcontainers/go:1.23",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "vscode",
   "postCreateCommand": "go mod download",
   "customizations": {
     "vscode": {
