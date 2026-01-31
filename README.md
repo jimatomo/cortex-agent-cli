@@ -12,12 +12,6 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 - Export existing agents to YAML
 - Key Pair (RSA JWT) authentication
 
-## Requirements
-
-- Go 1.22+ (for building from source)
-- Snowflake account with Cortex Agents enabled
-- Role: `CORTEX_USER` or `CORTEX_AGENT_USER`
-
 ## Install
 
 ### Quick Install (Recommended)
