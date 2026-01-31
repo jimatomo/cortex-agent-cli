@@ -1,6 +1,8 @@
-# coragent
+# coragent (Cortex Agent CLI)
 
 CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
+
+⚠️ This is an unofficial tool developed by a Snowflake user.
 
 ## Features
 
