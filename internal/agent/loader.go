@@ -125,5 +125,49 @@ func validateAgentSpec(spec AgentSpec) error {
 			return fmt.Errorf("tools[%d].tool_spec is required", i)
 		}
 	}
+	if spec.Deploy != nil && spec.Deploy.Grant != nil {
+		if err := validateGrantConfig(spec.Deploy.Grant); err != nil {
+			return fmt.Errorf("grant: %w", err)
+		}
+	}
+	return nil
+}
+
+func validateGrantConfig(grant *GrantConfig) error {
+	validPrivileges := map[string]bool{
+		"USAGE": true, "MODIFY": true, "MONITOR": true, "ALL": true,
+	}
+
+	for i, rg := range grant.AccountRoles {
+		if strings.TrimSpace(rg.Role) == "" {
+			return fmt.Errorf("account_roles[%d].role is required", i)
+		}
+		if len(rg.Privileges) == 0 {
+			return fmt.Errorf("account_roles[%d].privileges is required", i)
+		}
+		for j, priv := range rg.Privileges {
+			if !validPrivileges[strings.ToUpper(priv)] {
+				return fmt.Errorf("account_roles[%d].privileges[%d]: invalid privilege %q (valid: USAGE, MODIFY, MONITOR, ALL)", i, j, priv)
+			}
+		}
+	}
+
+	for i, rg := range grant.DatabaseRoles {
+		if strings.TrimSpace(rg.Role) == "" {
+			return fmt.Errorf("database_roles[%d].role is required", i)
+		}
+		if !strings.Contains(rg.Role, ".") {
+			return fmt.Errorf("database_roles[%d].role: %q must be fully qualified (DB.ROLE_NAME)", i, rg.Role)
+		}
+		if len(rg.Privileges) == 0 {
+			return fmt.Errorf("database_roles[%d].privileges is required", i)
+		}
+		for j, priv := range rg.Privileges {
+			if !validPrivileges[strings.ToUpper(priv)] {
+				return fmt.Errorf("database_roles[%d].privileges[%d]: invalid privilege %q (valid: USAGE, MODIFY, MONITOR, ALL)", i, j, priv)
+			}
+		}
+	}
+
 	return nil
 }

@@ -1,9 +1,22 @@
 package agent
 
+// RoleGrant specifies a role and its privileges.
+type RoleGrant struct {
+	Role       string   `yaml:"role" json:"role"`
+	Privileges []string `yaml:"privileges" json:"privileges"`
+}
+
+// GrantConfig specifies roles to grant privileges on the agent.
+type GrantConfig struct {
+	AccountRoles  []RoleGrant `yaml:"account_roles,omitempty" json:"account_roles,omitempty"`
+	DatabaseRoles []RoleGrant `yaml:"database_roles,omitempty" json:"database_roles,omitempty"`
+}
+
 // DeployConfig contains optional deployment-only settings.
 type DeployConfig struct {
-	Database string `yaml:"database,omitempty" json:"database,omitempty"`
-	Schema   string `yaml:"schema,omitempty" json:"schema,omitempty"`
+	Database string       `yaml:"database,omitempty" json:"database,omitempty"`
+	Schema   string       `yaml:"schema,omitempty" json:"schema,omitempty"`
+	Grant    *GrantConfig `yaml:"grant,omitempty" json:"grant,omitempty"`
 }
 
 // AgentSpec represents the Cortex Agent YAML/JSON schema payload.

@@ -1,6 +1,18 @@
 deploy:
   database: TEST_DB
   schema: PUBLIC
+  grant:
+    account_roles:
+      - role: ANALYST
+        privileges:
+          - USAGE
+    database_roles:
+      # - role: TEST_DB.CORTEX_USER
+      #   privileges:
+      #     - USAGE
+      - role: TEST_DB.CORTEX_MONITOR
+        privileges:
+          - MONITOR
 
 name: MY-SUPPORT-AGENT
 comment: Customer support agent

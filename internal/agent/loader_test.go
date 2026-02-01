@@ -126,3 +126,210 @@ func TestLoadAgentsRejectsUnknownFields(t *testing.T) {
 		t.Fatal("expected error for unknown field, got nil")
 	}
 }
+
+func TestLoadAgentWithGrant(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+deploy:
+  database: TEST_DB
+  schema: PUBLIC
+  grant:
+    account_roles:
+      - role: ANALYST_ROLE
+        privileges:
+          - USAGE
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false)
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	if agents[0].Spec.Deploy == nil {
+		t.Fatal("expected Deploy to be non-nil")
+	}
+	if agents[0].Spec.Deploy.Grant == nil {
+		t.Fatal("expected Grant to be non-nil")
+	}
+	if len(agents[0].Spec.Deploy.Grant.AccountRoles) != 1 {
+		t.Fatalf("expected 1 account role, got %d", len(agents[0].Spec.Deploy.Grant.AccountRoles))
+	}
+	if agents[0].Spec.Deploy.Grant.AccountRoles[0].Role != "ANALYST_ROLE" {
+		t.Errorf("expected role ANALYST_ROLE, got %s", agents[0].Spec.Deploy.Grant.AccountRoles[0].Role)
+	}
+}
+
+func TestLoadAgentWithMultiplePrivileges(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+deploy:
+  grant:
+    account_roles:
+      - role: ADMIN_ROLE
+        privileges:
+          - USAGE
+          - MODIFY
+          - MONITOR
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false)
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	if len(agents[0].Spec.Deploy.Grant.AccountRoles[0].Privileges) != 3 {
+		t.Fatalf("expected 3 privileges, got %d", len(agents[0].Spec.Deploy.Grant.AccountRoles[0].Privileges))
+	}
+}
+
+func TestLoadAgentRejectsInvalidPrivilege(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+deploy:
+  grant:
+    account_roles:
+      - role: ANALYST_ROLE
+        privileges:
+          - INVALID_PRIV
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	_, err = LoadAgents(path, false)
+	if err == nil {
+		t.Fatal("expected error for invalid privilege, got nil")
+	}
+}
+
+func TestLoadAgentRejectsUnqualifiedDatabaseRole(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+deploy:
+  grant:
+    database_roles:
+      - role: UNQUALIFIED_ROLE
+        privileges:
+          - USAGE
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	_, err = LoadAgents(path, false)
+	if err == nil {
+		t.Fatal("expected error for unqualified database role, got nil")
+	}
+}
+
+func TestLoadAgentRejectsEmptyRole(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+deploy:
+  grant:
+    account_roles:
+      - role: ""
+        privileges:
+          - USAGE
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	_, err = LoadAgents(path, false)
+	if err == nil {
+		t.Fatal("expected error for empty role, got nil")
+	}
+}
+
+func TestLoadAgentRejectsEmptyPrivileges(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+deploy:
+  grant:
+    account_roles:
+      - role: ANALYST_ROLE
+        privileges: []
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	_, err = LoadAgents(path, false)
+	if err == nil {
+		t.Fatal("expected error for empty privileges, got nil")
+	}
+}
+
+func TestLoadAgentWithDatabaseRole(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+deploy:
+  grant:
+    database_roles:
+      - role: TEST_DB.DATA_READER
+        privileges:
+          - USAGE
+          - MONITOR
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false)
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	if len(agents[0].Spec.Deploy.Grant.DatabaseRoles) != 1 {
+		t.Fatalf("expected 1 database role, got %d", len(agents[0].Spec.Deploy.Grant.DatabaseRoles))
+	}
+	if agents[0].Spec.Deploy.Grant.DatabaseRoles[0].Role != "TEST_DB.DATA_READER" {
+		t.Errorf("expected role TEST_DB.DATA_READER, got %s", agents[0].Spec.Deploy.Grant.DatabaseRoles[0].Role)
+	}
+}
+
+func TestLoadAgentWithAllPrivilege(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+deploy:
+  grant:
+    account_roles:
+      - role: ADMIN_ROLE
+        privileges:
+          - ALL
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false)
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	if agents[0].Spec.Deploy.Grant.AccountRoles[0].Privileges[0] != "ALL" {
+		t.Errorf("expected privilege ALL, got %s", agents[0].Spec.Deploy.Grant.AccountRoles[0].Privileges[0])
+	}
+}
