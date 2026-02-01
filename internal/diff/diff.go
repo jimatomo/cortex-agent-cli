@@ -119,14 +119,16 @@ func diffAny(path string, local, remote any, changes *[]Change, opts Options) {
 		return
 	}
 	if local == nil {
-		*changes = append(*changes, Change{Path: path, Type: Added, Before: nil, After: remote})
+		// Remote has value, local doesn't -> removing the field
+		*changes = append(*changes, Change{Path: path, Type: Removed, Before: remote, After: nil})
 		return
 	}
 	if remote == nil {
 		if opts.IgnoreMissingRemote {
 			return
 		}
-		*changes = append(*changes, Change{Path: path, Type: Removed, Before: local, After: nil})
+		// Local has value, remote doesn't -> adding the field
+		*changes = append(*changes, Change{Path: path, Type: Added, Before: nil, After: local})
 		return
 	}
 
