@@ -366,7 +366,7 @@ func TestDiff_NestedNilHandling(t *testing.T) {
 }
 
 // TestDiff_ModifiedValue tests value modification detection.
-// Note: In the current implementation, Before=local (new value), After=remote (old value).
+// Note: Before=remote (old value), After=local (new value).
 func TestDiff_ModifiedValue(t *testing.T) {
 	local := agent.AgentSpec{
 		Name:    "agent",
@@ -392,12 +392,12 @@ func TestDiff_ModifiedValue(t *testing.T) {
 	if c.Type != Modified {
 		t.Errorf("expected Modified, got %s", c.Type)
 	}
-	// Current implementation: Before=local, After=remote
-	if c.Before != "new comment" {
-		t.Errorf("expected Before='new comment', got %v", c.Before)
+	// Before=remote (old value), After=local (new value)
+	if c.Before != "old comment" {
+		t.Errorf("expected Before='old comment', got %v", c.Before)
 	}
-	if c.After != "old comment" {
-		t.Errorf("expected After='old comment', got %v", c.After)
+	if c.After != "new comment" {
+		t.Errorf("expected After='new comment', got %v", c.After)
 	}
 }
 

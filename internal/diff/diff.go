@@ -136,7 +136,7 @@ func diffAny(path string, local, remote any, changes *[]Change, opts Options) {
 	case map[string]any:
 		r, ok := remote.(map[string]any)
 		if !ok {
-			*changes = append(*changes, Change{Path: path, Type: Modified, Before: local, After: remote})
+			*changes = append(*changes, Change{Path: path, Type: Modified, Before: remote, After: local})
 			return
 		}
 		keys := uniqueKeys(l, r)
@@ -177,7 +177,7 @@ func diffAny(path string, local, remote any, changes *[]Change, opts Options) {
 		}
 	default:
 		if !reflect.DeepEqual(local, remote) {
-			*changes = append(*changes, Change{Path: path, Type: Modified, Before: local, After: remote})
+			*changes = append(*changes, Change{Path: path, Type: Modified, Before: remote, After: local})
 		}
 	}
 }

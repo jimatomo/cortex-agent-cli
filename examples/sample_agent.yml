@@ -21,9 +21,19 @@ tools:
             This is a sample semantic view.
         name: sample_semantic_view
         type: cortex_analyst_text_to_sql
+    - tool_spec:
+        description: This is a sample semantic view. 2nd
+        name: sample_semantic_view_2
+        type: cortex_analyst_text_to_sql
 tool_resources:
     sample_semantic_view:
         execution_environment:
             type: warehouse
             warehouse: ""
         semantic_view: TEST_DB.PUBLIC.SAMPLE_SM
+    sample_semantic_view_2:
+        execution_environment:
+            query_timeout: 60
+            type: warehouse
+            warehouse: COMPUTE_WH
+        semantic_view: TEST_DB.PUBLIC.SAMPLE_SM_2
