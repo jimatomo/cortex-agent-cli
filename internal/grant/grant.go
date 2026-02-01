@@ -72,7 +72,19 @@ func ComputeDiff(desired, current GrantState) GrantDiff {
 	return diff
 }
 
+// allPrivileges is the list of individual privileges that ALL expands to.
+var allPrivileges = []string{"USAGE", "MODIFY", "MONITOR"}
+
+// expandPrivilege expands ALL to individual privileges, or returns the privilege as-is.
+func expandPrivilege(priv string) []string {
+	if strings.ToUpper(priv) == "ALL" {
+		return allPrivileges
+	}
+	return []string{strings.ToUpper(priv)}
+}
+
 // FromGrantConfig converts YAML GrantConfig to GrantState.
+// ALL privilege is expanded to individual privileges (USAGE, MODIFY, MONITOR).
 func FromGrantConfig(cfg *agent.GrantConfig) GrantState {
 	if cfg == nil {
 		return GrantState{}
@@ -82,21 +94,25 @@ func FromGrantConfig(cfg *agent.GrantConfig) GrantState {
 
 	for _, rg := range cfg.AccountRoles {
 		for _, priv := range rg.Privileges {
-			entries = append(entries, GrantEntry{
-				Privilege: strings.ToUpper(priv),
-				RoleType:  "ROLE",
-				RoleName:  rg.Role,
-			})
+			for _, expandedPriv := range expandPrivilege(priv) {
+				entries = append(entries, GrantEntry{
+					Privilege: expandedPriv,
+					RoleType:  "ROLE",
+					RoleName:  rg.Role,
+				})
+			}
 		}
 	}
 
 	for _, rg := range cfg.DatabaseRoles {
 		for _, priv := range rg.Privileges {
-			entries = append(entries, GrantEntry{
-				Privilege: strings.ToUpper(priv),
-				RoleType:  "DATABASE ROLE",
-				RoleName:  rg.Role,
-			})
+			for _, expandedPriv := range expandPrivilege(priv) {
+				entries = append(entries, GrantEntry{
+					Privilege: expandedPriv,
+					RoleType:  "DATABASE ROLE",
+					RoleName:  rg.Role,
+				})
+			}
 		}
 	}
 

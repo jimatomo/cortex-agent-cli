@@ -5,7 +5,7 @@ deploy:
     account_roles:
       - role: ANALYST
         privileges:
-          - USAGE
+          - ALL
     database_roles:
       # - role: TEST_DB.CORTEX_USER
       #   privileges:

@@ -142,6 +142,51 @@ func TestFromGrantConfig_Nil(t *testing.T) {
 	}
 }
 
+func TestFromGrantConfig_ExpandsAll(t *testing.T) {
+	cfg := &agent.GrantConfig{
+		AccountRoles: []agent.RoleGrant{
+			{Role: "ADMIN_ROLE", Privileges: []string{"ALL"}},
+		},
+	}
+
+	state := FromGrantConfig(cfg)
+
+	// ALL should be expanded to USAGE, MODIFY, MONITOR
+	if len(state.Entries) != 3 {
+		t.Errorf("expected 3 entries (ALL expanded), got %d", len(state.Entries))
+	}
+
+	privs := make(map[string]bool)
+	for _, e := range state.Entries {
+		privs[e.Privilege] = true
+		if e.RoleName != "ADMIN_ROLE" {
+			t.Errorf("expected role ADMIN_ROLE, got %s", e.RoleName)
+		}
+	}
+
+	for _, expected := range []string{"USAGE", "MODIFY", "MONITOR"} {
+		if !privs[expected] {
+			t.Errorf("expected privilege %s not found", expected)
+		}
+	}
+}
+
+func TestFromGrantConfig_AllWithOtherPrivileges(t *testing.T) {
+	cfg := &agent.GrantConfig{
+		AccountRoles: []agent.RoleGrant{
+			{Role: "ROLE1", Privileges: []string{"ALL"}},
+			{Role: "ROLE2", Privileges: []string{"USAGE"}},
+		},
+	}
+
+	state := FromGrantConfig(cfg)
+
+	// ROLE1: 3 entries (ALL expanded), ROLE2: 1 entry
+	if len(state.Entries) != 4 {
+		t.Errorf("expected 4 entries, got %d", len(state.Entries))
+	}
+}
+
 func TestFromShowGrantsRows(t *testing.T) {
 	rows := []ShowGrantsRow{
 		{Privilege: "USAGE", GrantedTo: "ROLE", GranteeName: "ANALYST_ROLE"},
