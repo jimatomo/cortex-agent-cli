@@ -99,7 +99,7 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 						fmt.Fprintf(os.Stdout, "    %s %s: %s\n",
 							color.New(color.FgGreen).Sprint("+"),
 							c.Path,
-							formatValue(c.Before),
+							formatValue(c.After),
 						)
 					}
 					continue
@@ -112,8 +112,8 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 					fmt.Fprintf(os.Stdout, "  %s %s: %s -> %s\n",
 						changeSymbol(c.Type),
 						c.Path,
-						formatValue(c.After),
 						formatValue(c.Before),
+						formatValue(c.After),
 					)
 				}
 			}
@@ -189,10 +189,25 @@ func updatePayload(spec agent.AgentSpec, changes []diff.Change) (map[string]any,
 		if val, ok := local[key]; ok {
 			payload[key] = val
 		} else {
-			payload[key] = nil
+			// Use empty values instead of null for deletion
+			// Snowflake API may ignore null values
+			payload[key] = emptyValueForKey(key)
 		}
 	}
 	return payload, nil
+}
+
+// emptyValueForKey returns the appropriate empty value for a given field.
+// Some fields require empty arrays, others require empty objects.
+func emptyValueForKey(key string) any {
+	switch key {
+	case "tools":
+		return []any{}
+	case "tool_resources":
+		return map[string]any{}
+	default:
+		return nil
+	}
 }
 
 func topLevel(path string) string {

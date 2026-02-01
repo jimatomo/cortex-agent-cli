@@ -590,6 +590,11 @@ func normalizeAgentSpecMap(input map[string]any) map[string]any {
 				out[normalizedKey] = normalizeToolsList(list)
 				continue
 			}
+		case "tool_resources":
+			if m, ok := value.(map[string]any); ok {
+				out[normalizedKey] = normalizeToolResources(m)
+				continue
+			}
 		}
 		out[normalizedKey] = value
 	}
@@ -846,4 +851,35 @@ func isIdentifierStart(r rune) bool {
 
 func isIdentifierPart(r rune) bool {
 	return isIdentifierStart(r) || (r >= '0' && r <= '9') || r == '$'
+}
+
+// normalizeToolResources converts API response format to expected format.
+// API response format: {"tool_name": [{"semantic_view": "...", ...}]} (array with single element)
+// Expected format: {"tool_name": {"semantic_view": "...", ...}} (direct object)
+func normalizeToolResources(input map[string]any) map[string]any {
+	out := make(map[string]any, len(input))
+
+	for toolName, value := range input {
+		switch v := value.(type) {
+		case []any:
+			// Array format - take first element
+			if len(v) > 0 {
+				if resource, ok := v[0].(map[string]any); ok {
+					out[toolName] = resource
+				}
+			}
+		case []map[string]any:
+			// Array format - take first element
+			if len(v) > 0 {
+				out[toolName] = v[0]
+			}
+		case map[string]any:
+			// Already in expected format
+			out[toolName] = v
+		default:
+			out[toolName] = value
+		}
+	}
+
+	return out
 }

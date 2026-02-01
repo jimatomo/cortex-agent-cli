@@ -52,5 +52,5 @@ type Tool struct {
 }
 
 // ToolResources allows tool-specific configuration blocks.
-// The keys are tool types (e.g., "cortex_search"), and each entry is a list of resources.
-type ToolResources map[string][]map[string]any
+// The keys are tool names (matching tool_spec.name), and values are resource configurations.
+type ToolResources map[string]map[string]any
