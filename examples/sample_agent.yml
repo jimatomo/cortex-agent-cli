@@ -25,6 +25,10 @@ tools:
         description: This is a sample semantic view. 2nd
         name: sample_semantic_view_2
         type: cortex_analyst_text_to_sql
+    - tool_spec:
+        description: snowflake docs service
+        name: snowflake_docs_service
+        type: cortex_search
 tool_resources:
     sample_semantic_view:
         execution_environment:
@@ -37,3 +41,8 @@ tool_resources:
             type: warehouse
             warehouse: COMPUTE_WH
         semantic_view: TEST_DB.PUBLIC.SAMPLE_SM_2
+    snowflake_docs_service:
+        id_column: SOURCE_URL
+        max_results: 4
+        search_service: SNOWFLAKE_DOCUMENTATION.SHARED.CKE_SNOWFLAKE_DOCS_SERVICE
+        title_column: DOCUMENT_TITLE
