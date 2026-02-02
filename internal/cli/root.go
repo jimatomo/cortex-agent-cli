@@ -43,6 +43,7 @@ func NewRootCmd() *cobra.Command {
 		newDeleteCmd(opts),
 		newValidateCmd(opts),
 		newExportCmd(opts),
+		newRunCmd(opts),
 	)
 
 	return cmd
