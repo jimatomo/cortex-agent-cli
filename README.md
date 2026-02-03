@@ -125,6 +125,7 @@ Settings are resolved in the following order (highest priority first):
 | `coragent validate [path]` | Validate YAML files only (default: `.`) |
 | `coragent export <agent-name>` | Export existing agent to YAML |
 | `coragent run <agent-name>` | Run an agent with streaming response |
+| `coragent threads` | Manage conversation threads |
 
 ## Global Flags
 
@@ -209,6 +210,49 @@ coragent run my-agent -m "Query" --show-tools --debug
 | `--without-thread` | Run without thread support (single-turn) |
 | `--show-thinking` | Display reasoning tokens on stderr |
 | `--show-tools` | Display tool usage on stderr |
+
+## Threads
+
+Manage conversation threads across all agents.
+
+### Usage
+
+```bash
+# Interactive mode - list threads and delete interactively
+coragent threads
+
+# List all threads (non-interactive)
+coragent threads --list
+
+# Delete a specific thread by ID
+coragent threads --delete 29864464
+```
+
+### Interactive Mode
+
+In interactive mode, you can view all threads and select which ones to delete:
+
+```
+Threads:
+  [1] Thread 29864468 (2 hours ago) - "What are the top sales..."
+      Agent: ACCOUNT/TEST_DB/PUBLIC/MY_AGENT
+  [2] Thread 29864464 (1 day ago) - "Tell me about inventory..."
+      Agent: ACCOUNT/TEST_DB/PUBLIC/OTHER_AGENT
+
+  [d] Delete threads  [q] Quit
+  Select: d
+  Select threads to delete (space-separated, or 'all'): 1 2
+  Delete 2 threads? [y/N]: y
+  Deleted thread 29864468
+  Deleted thread 29864464
+```
+
+### Threads Flags
+
+| Flag | Description |
+|------|-------------|
+| `--list` | List all threads and exit (no API credentials required) |
+| `--delete <id>` | Delete a specific thread by ID |
 
 ## CI/CD
 

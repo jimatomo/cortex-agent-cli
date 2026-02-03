@@ -112,6 +112,11 @@ func (s *StateStore) DeleteThread(account, db, schema, agent string, threadID st
 	}
 }
 
+// GetAllThreads returns all threads across all agents.
+func (s *StateStore) GetAllThreads() map[string][]ThreadState {
+	return s.Threads
+}
+
 // stateKey generates a unique key for an agent.
 func stateKey(account, db, schema, agent string) string {
 	return strings.ToUpper(account) + "/" +

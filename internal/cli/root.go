@@ -44,6 +44,7 @@ func NewRootCmd() *cobra.Command {
 		newValidateCmd(opts),
 		newExportCmd(opts),
 		newRunCmd(opts),
+		newThreadsCmd(opts),
 	)
 
 	return cmd
