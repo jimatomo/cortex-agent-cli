@@ -10,6 +10,7 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 - Plan/Apply workflow with diff detection (PUT update only when changed)
 - Validate YAML schema (unknown fields rejected)
 - Export existing agents to YAML
+- Run agents with streaming response and multi-turn conversation support
 - Key Pair (RSA JWT) authentication
 
 ## Install
@@ -123,6 +124,7 @@ Settings are resolved in the following order (highest priority first):
 | `coragent apply [path]` | Apply changes to agents (default: `.`) |
 | `coragent validate [path]` | Validate YAML files only (default: `.`) |
 | `coragent export <agent-name>` | Export existing agent to YAML |
+| `coragent run <agent-name>` | Run an agent with streaming response |
 
 ## Global Flags
 
@@ -147,6 +149,66 @@ coragent export my-agent
 # Output to file
 coragent export my-agent --out ./my-agent.yaml
 ```
+
+## Run
+
+Run an agent interactively with streaming response and conversation thread support.
+
+### Basic Usage
+
+```bash
+# Run with interactive thread selection
+coragent run my-agent -m "What are the top sales by region?"
+
+# Start a new conversation thread
+coragent run my-agent --new -m "Starting fresh topic"
+
+# Continue a specific thread
+coragent run my-agent --thread 12345 -m "Follow-up question"
+
+# Single-turn mode (no thread tracking)
+coragent run my-agent --without-thread -m "One-off question"
+```
+
+### Thread Support
+
+Threads enable multi-turn conversations with context preservation. The CLI transparently manages threads via the Snowflake Cortex Threads API.
+
+| Flag | Behavior |
+|------|----------|
+| (none) | Interactive selection from existing threads, or create new |
+| `--new` | Create a new thread immediately |
+| `--thread <id>` | Continue a specific thread by ID |
+| `--without-thread` | Single-turn request without thread tracking |
+
+Thread state is stored locally in `~/.coragent/threads.json` to track:
+- Thread ID and last message ID (for `parent_message_id`)
+- Last used timestamp
+- Conversation summary
+
+### Display Options
+
+```bash
+# Show agent's reasoning/thinking process
+coragent run my-agent -m "Complex query" --show-thinking
+
+# Show tool usage (SQL queries, search calls, etc.)
+coragent run my-agent -m "Query data" --show-tools
+
+# Combine with debug for full details
+coragent run my-agent -m "Query" --show-tools --debug
+```
+
+### Run Flags
+
+| Flag | Description |
+|------|-------------|
+| `-m, --message` | Message to send to the agent (required) |
+| `--new` | Start a new conversation thread |
+| `--thread <id>` | Continue a specific thread by ID |
+| `--without-thread` | Run without thread support (single-turn) |
+| `--show-thinking` | Display reasoning tokens on stderr |
+| `--show-tools` | Display tool usage on stderr |
 
 ## CI/CD
 

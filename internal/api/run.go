@@ -16,7 +16,9 @@ import (
 
 // RunAgentRequest represents the request payload for running an agent.
 type RunAgentRequest struct {
-	Messages []Message `json:"messages"`
+	Messages        []Message `json:"messages"`
+	ThreadID        string    `json:"thread_id,omitempty"`
+	ParentMessageID *int64    `json:"parent_message_id,omitempty"`
 }
 
 // Message represents a chat message.
@@ -78,7 +80,14 @@ type ToolResultEvent struct {
 
 // ResponseEvent represents the final complete response.
 type ResponseEvent struct {
-	Content []ResponseContentBlock `json:"content"`
+	Content  []ResponseContentBlock `json:"content"`
+	Metadata *ResponseMetadata      `json:"metadata,omitempty"`
+}
+
+// ResponseMetadata contains metadata about the response including thread info.
+type ResponseMetadata struct {
+	ThreadID  string `json:"thread_id,omitempty"`
+	MessageID int64  `json:"message_id,omitempty"`
 }
 
 // ResponseContentBlock represents a content block in the final response.
@@ -103,6 +112,16 @@ type StatusEvent struct {
 	SequenceNumber int    `json:"sequence_number"`
 }
 
+// MetadataEvent represents thread/message metadata from the response.
+// The actual metadata is nested inside a "metadata" field.
+type MetadataEvent struct {
+	Metadata struct {
+		MessageID int64  `json:"message_id"`
+		ThreadID  string `json:"thread_id"`
+		Role      string `json:"role"`
+	} `json:"metadata"`
+}
+
 // RunAgentOptions configures callbacks for streaming events.
 type RunAgentOptions struct {
 	OnStatus        func(status, message string)
@@ -110,6 +129,7 @@ type RunAgentOptions struct {
 	OnThinkingDelta func(delta string)
 	OnToolUse       func(name string, input json.RawMessage)
 	OnToolResult    func(name string, result json.RawMessage)
+	OnMetadata      func(threadID string, messageID int64)
 }
 
 // RunAgent executes an agent with SSE streaming.
@@ -292,6 +312,10 @@ func processSSEEvent(eventType, data string, opts RunAgentOptions, finalResponse
 			return fmt.Errorf("parse response: %w", err)
 		}
 		*finalResponse = &evt
+		// Also extract thread metadata from response if available
+		if evt.Metadata != nil && opts.OnMetadata != nil {
+			opts.OnMetadata(evt.Metadata.ThreadID, evt.Metadata.MessageID)
+		}
 
 	case "error":
 		var evt ErrorEvent
@@ -299,6 +323,15 @@ func processSSEEvent(eventType, data string, opts RunAgentOptions, finalResponse
 			return fmt.Errorf("parse error event: %w", err)
 		}
 		return fmt.Errorf("agent error [%s]: %s", evt.Code, evt.Message)
+
+	case "metadata":
+		var evt MetadataEvent
+		if err := json.Unmarshal([]byte(data), &evt); err != nil {
+			return fmt.Errorf("parse metadata: %w", err)
+		}
+		if opts.OnMetadata != nil {
+			opts.OnMetadata(evt.Metadata.ThreadID, evt.Metadata.MessageID)
+		}
 	}
 
 	return nil
