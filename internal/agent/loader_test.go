@@ -113,6 +113,31 @@ func TestLoadAgentsFromDirRecursive(t *testing.T) {
 	}
 }
 
+func TestLoadAgentsSkipsDotFiles(t *testing.T) {
+	dir := t.TempDir()
+	// Valid agent file
+	err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte("name: my-agent"), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	// Dotfile that is not an agent spec (e.g. .goreleaser.yaml)
+	err = os.WriteFile(filepath.Join(dir, ".goreleaser.yaml"), []byte("version: 2\nproject_name: foo\n"), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(dir, false)
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent (dotfile should be skipped), got %d", len(agents))
+	}
+	if agents[0].Spec.Name != "my-agent" {
+		t.Fatalf("unexpected agent name: %s", agents[0].Spec.Name)
+	}
+}
+
 func TestLoadAgentsRejectsUnknownFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "agent.yaml")
@@ -306,6 +331,48 @@ deploy:
 	}
 	if agents[0].Spec.Deploy.Grant.DatabaseRoles[0].Role != "TEST_DB.DATA_READER" {
 		t.Errorf("expected role TEST_DB.DATA_READER, got %s", agents[0].Spec.Deploy.Grant.DatabaseRoles[0].Role)
+	}
+}
+
+func TestLoadAgentWithEval(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+eval:
+  tests:
+    - question: "売上データを教えて"
+      expected_tools:
+        - sample_semantic_view
+    - question: "ドキュメントを検索して"
+      expected_tools:
+        - snowflake_docs_service
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false)
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	if agents[0].Spec.Eval == nil {
+		t.Fatal("expected Eval to be non-nil")
+	}
+	if len(agents[0].Spec.Eval.Tests) != 2 {
+		t.Fatalf("expected 2 eval tests, got %d", len(agents[0].Spec.Eval.Tests))
+	}
+	if agents[0].Spec.Eval.Tests[0].Question != "売上データを教えて" {
+		t.Errorf("unexpected question: %s", agents[0].Spec.Eval.Tests[0].Question)
+	}
+	if len(agents[0].Spec.Eval.Tests[0].ExpectedTools) != 1 {
+		t.Fatalf("expected 1 expected tool, got %d", len(agents[0].Spec.Eval.Tests[0].ExpectedTools))
+	}
+	if agents[0].Spec.Eval.Tests[0].ExpectedTools[0] != "sample_semantic_view" {
+		t.Errorf("unexpected expected tool: %s", agents[0].Spec.Eval.Tests[0].ExpectedTools[0])
 	}
 }
 

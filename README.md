@@ -11,6 +11,7 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 - Validate YAML schema (unknown fields rejected)
 - Export existing agents to YAML
 - Run agents with streaming response and multi-turn conversation support
+- Evaluate agent accuracy with test cases defined in YAML
 - Key Pair (RSA JWT) authentication
 - OAuth authentication (experimental)
 
@@ -219,6 +220,7 @@ coragent logout --all
 | `coragent validate [path]` | Validate YAML files only (default: `.`) |
 | `coragent export <agent-name>` | Export existing agent to YAML |
 | `coragent run <agent-name>` | Run an agent with streaming response |
+| `coragent eval [path]` | Evaluate agent accuracy using test cases (default: `.`) |
 | `coragent threads` | Manage conversation threads |
 | `coragent login` | Authenticate with Snowflake using OAuth |
 | `coragent logout` | Remove stored OAuth tokens |
@@ -307,6 +309,66 @@ coragent run my-agent -m "Query" --show-tools --debug
 | `--without-thread` | Run without thread support (single-turn) |
 | `--show-thinking` | Display reasoning tokens on stderr |
 | `--show-tools` | Display tool usage on stderr |
+
+## Eval
+
+Evaluate agent accuracy by running test cases defined in the YAML spec file's `eval` section. Each test sends a question to the agent and verifies that the expected tools were used.
+
+### YAML Definition
+
+Add an `eval` section to your agent spec:
+
+```yaml
+eval:
+  tests:
+    - question: "Show me the sales data"
+      expected_tools:
+        - sample_semantic_view
+    - question: "Search the Snowflake docs"
+      expected_tools:
+        - snowflake_docs_service
+```
+
+### Usage
+
+```bash
+# Evaluate agents in current directory
+coragent eval
+
+# Evaluate a specific spec file
+coragent eval agent.yaml
+
+# Evaluate all agents in a directory
+coragent eval ./agents/
+
+# Recursive directory scan
+coragent eval ./agents/ -R
+
+# Specify output directory
+coragent eval agent.yaml -o ./eval-results
+```
+
+### Output
+
+Two report files are generated per agent:
+
+- **`{agent_name}_eval.json`** - Machine-readable results with full response text
+- **`{agent_name}_eval.md`** - Markdown report with summary table and collapsible details
+
+### Result Icons
+
+| Icon | Meaning |
+|------|---------|
+| ✅ | All expected tools were used, no extra tool calls |
+| ⚠️ | Expected tools were used, but extra or duplicate tool calls detected (agent may have struggled) |
+| ❌ | Expected tools were not all used |
+
+### Eval Flags
+
+| Flag | Description |
+|------|-------------|
+| `-o, --output-dir` | Output directory for reports (default: `.`) |
+| `-R, --recursive` | Recursively load agents from subdirectories |
 
 ## Threads
 

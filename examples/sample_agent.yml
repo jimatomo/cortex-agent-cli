@@ -14,6 +14,15 @@ deploy:
         privileges:
           - MONITOR
 
+eval:
+  tests:
+    - question: "Show me the data of the largest expense"
+      expected_tools:
+        - sample_semantic_view
+    - question: "How do I use the Snowflake AI_FILTER function?"
+      expected_tools:
+        - cortex_search
+
 name: MY-SUPPORT-AGENT
 comment: Customer support agent
 profile:

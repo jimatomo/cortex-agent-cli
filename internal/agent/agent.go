@@ -19,9 +19,21 @@ type DeployConfig struct {
 	Grant    *GrantConfig `yaml:"grant,omitempty" json:"grant,omitempty"`
 }
 
+// EvalConfig contains evaluation test cases.
+type EvalConfig struct {
+	Tests []EvalTestCase `yaml:"tests" json:"tests"`
+}
+
+// EvalTestCase defines a single evaluation test case.
+type EvalTestCase struct {
+	Question      string   `yaml:"question" json:"question"`
+	ExpectedTools []string `yaml:"expected_tools" json:"expected_tools"`
+}
+
 // AgentSpec represents the Cortex Agent YAML/JSON schema payload.
 type AgentSpec struct {
 	Deploy        *DeployConfig  `yaml:"deploy,omitempty" json:"-"`
+	Eval          *EvalConfig    `yaml:"eval,omitempty" json:"-"`
 	Name          string         `yaml:"name" json:"name" validate:"required"`
 	Comment       string         `yaml:"comment,omitempty" json:"comment,omitempty"`
 	Profile       *Profile       `yaml:"profile,omitempty" json:"profile,omitempty"`

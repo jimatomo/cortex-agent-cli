@@ -112,6 +112,10 @@ func loadFromFile(path string) (AgentSpec, error) {
 }
 
 func isYAML(path string) bool {
+	name := filepath.Base(path)
+	if strings.HasPrefix(name, ".") {
+		return false
+	}
 	ext := strings.ToLower(filepath.Ext(path))
 	return ext == ".yaml" || ext == ".yml"
 }
