@@ -12,6 +12,7 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 - Export existing agents to YAML
 - Run agents with streaming response and multi-turn conversation support
 - Key Pair (RSA JWT) authentication
+- OAuth authentication (experimental)
 
 ## Install
 
@@ -55,6 +56,22 @@ go build -o coragent ./cmd/coragent
 ## Quick Start
 
 ### 1) Configure credentials
+
+Choose one of two authentication methods:
+
+**Option A: OAuth (Recommended for interactive use)**
+
+```bash
+export SNOWFLAKE_ACCOUNT=your_account
+
+# Login via browser (opens authentication page)
+coragent login
+
+# Enable OAuth for subsequent commands
+export SNOWFLAKE_AUTHENTICATOR=OAUTH
+```
+
+**Option B: Key Pair (Recommended for CI/CD)**
 
 ```bash
 export SNOWFLAKE_ACCOUNT=your_account
@@ -116,6 +133,83 @@ Settings are resolved in the following order (highest priority first):
 2. YAML `deploy` section
 3. Environment variables: `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA`
 
+## OAuth Authentication (Experimental)
+
+> **Warning**: OAuth authentication is an experimental feature. The API and behavior may change in future versions.
+
+As an alternative to Key Pair authentication, you can use Snowflake OAuth (Authorization Code Flow) to authenticate via browser. This uses Snowflake's built-in `SNOWFLAKE$LOCAL_APPLICATION` security integration.
+
+For more details, see [Snowflake OAuth for Local Applications](https://docs.snowflake.com/en/user-guide/oauth-local-applications).
+
+### Snowflake Setup (Optional)
+
+The CLI uses the built-in `SNOWFLAKE$LOCAL_APPLICATION` security integration. In most cases, no setup is required.
+
+### Login
+
+Authenticate via browser:
+
+```bash
+# Opens browser for authentication
+coragent login --account your_account
+
+# Manual mode (displays URL instead of opening browser)
+coragent login --account your_account --no-browser
+```
+
+After successful authentication, tokens are stored in `~/.coragent/oauth.json`.
+
+### Using OAuth
+
+Once logged in, enable OAuth authentication:
+
+```bash
+export SNOWFLAKE_AUTHENTICATOR=OAUTH
+
+# Now run commands as usual
+coragent run my-agent -m "Hello"
+```
+
+### Check Status
+
+View current authentication status:
+
+```bash
+coragent auth status
+```
+
+Example output:
+```
+Authentication Status
+=====================
+
+Account: MYACCOUNT
+Method:  OAUTH
+
+Status:  Authenticated
+Expires: 2024-01-15T14:30:00Z (45 minutes remaining)
+Refresh: Available (automatic renewal)
+```
+
+### Logout
+
+Remove stored OAuth tokens:
+
+```bash
+# Logout from specific account
+coragent logout --account your_account
+
+# Logout from all accounts
+coragent logout --all
+```
+
+### OAuth Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `SNOWFLAKE_AUTHENTICATOR` | Set to `OAUTH` to enable OAuth authentication |
+| `SNOWFLAKE_OAUTH_REDIRECT_URI` | Redirect URI (default: `http://127.0.0.1:8080`) |
+
 ## Commands
 
 | Command | Description |
@@ -126,6 +220,9 @@ Settings are resolved in the following order (highest priority first):
 | `coragent export <agent-name>` | Export existing agent to YAML |
 | `coragent run <agent-name>` | Run an agent with streaming response |
 | `coragent threads` | Manage conversation threads |
+| `coragent login` | Authenticate with Snowflake using OAuth |
+| `coragent logout` | Remove stored OAuth tokens |
+| `coragent auth status` | Show authentication status |
 
 ## Global Flags
 

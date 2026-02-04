@@ -328,12 +328,12 @@ func (c *Client) doJSON(ctx context.Context, method, urlStr string, payload any,
 	}
 
 	// Set authorization header
-	authHeader, err := auth.AuthHeader(ctx, c.authCfg)
+	token, tokenType, err := auth.BearerToken(ctx, c.authCfg)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", authHeader)
-	req.Header.Set("X-Snowflake-Authorization-Token-Type", "KEYPAIR_JWT")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Snowflake-Authorization-Token-Type", tokenType)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
 	if payload != nil {

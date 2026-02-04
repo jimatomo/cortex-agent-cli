@@ -45,6 +45,9 @@ func NewRootCmd() *cobra.Command {
 		newExportCmd(opts),
 		newRunCmd(opts),
 		newThreadsCmd(opts),
+		newLoginCmd(opts),
+		newLogoutCmd(opts),
+		newAuthCmd(opts),
 	)
 
 	return cmd

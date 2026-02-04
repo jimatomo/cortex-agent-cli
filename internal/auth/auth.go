@@ -19,6 +19,7 @@ import (
 
 const (
 	AuthenticatorKeyPair = "KEYPAIR"
+	AuthenticatorOAuth   = "OAUTH"
 )
 
 type Config struct {
@@ -29,6 +30,8 @@ type Config struct {
 	PrivateKey           string
 	PrivateKeyPassphrase string
 	Authenticator        string
+	// OAuth redirect URI (optional, default: http://127.0.0.1:8080/callback)
+	OAuthRedirectURI string
 }
 
 func FromEnv() Config {
@@ -40,18 +43,21 @@ func FromEnv() Config {
 		PrivateKey:           os.Getenv("SNOWFLAKE_PRIVATE_KEY"),
 		PrivateKeyPassphrase: os.Getenv("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE"),
 		Authenticator:        envOrDefault("SNOWFLAKE_AUTHENTICATOR", AuthenticatorKeyPair),
+		OAuthRedirectURI:     envOrDefault("SNOWFLAKE_OAUTH_REDIRECT_URI", DefaultOAuthRedirectURI),
 	}
 }
 
 func AuthHeader(ctx context.Context, cfg Config) (string, error) {
-	token, err := BearerToken(ctx, cfg)
+	token, _, err := BearerToken(ctx, cfg)
 	if err != nil {
 		return "", err
 	}
 	return "Bearer " + token, nil
 }
 
-func BearerToken(ctx context.Context, cfg Config) (string, error) {
+// BearerToken returns the bearer token and token type for the configured authenticator.
+// Token types: "KEYPAIR_JWT" for key pair auth, "OAUTH" for OAuth.
+func BearerToken(ctx context.Context, cfg Config) (token string, tokenType string, err error) {
 	auth := strings.ToUpper(strings.TrimSpace(cfg.Authenticator))
 	if auth == "" {
 		auth = AuthenticatorKeyPair
@@ -59,9 +65,13 @@ func BearerToken(ctx context.Context, cfg Config) (string, error) {
 
 	switch auth {
 	case AuthenticatorKeyPair:
-		return keyPairJWT(cfg)
+		token, err := keyPairJWT(cfg)
+		return token, "KEYPAIR_JWT", err
+	case AuthenticatorOAuth:
+		token, err := GetValidAccessToken(ctx, cfg)
+		return token, "OAUTH", err
 	default:
-		return "", fmt.Errorf("unsupported authenticator: %s", cfg.Authenticator)
+		return "", "", fmt.Errorf("unsupported authenticator: %s", cfg.Authenticator)
 	}
 }
 
@@ -247,18 +257,6 @@ func publicKeyFingerprint(pub *rsa.PublicKey) (string, error) {
 	}
 	sum := sha256.Sum256(der)
 	return base64.StdEncoding.EncodeToString(sum[:]), nil
-}
-
-func normalizeUser(user string) string {
-	trimmed := strings.TrimSpace(user)
-	if trimmed == "" {
-		return trimmed
-	}
-	if isSimpleIdentifier(trimmed) {
-		return strings.ToUpper(trimmed)
-	}
-	// Preserve quoted/complex identifiers (e.g., email-based usernames).
-	return trimmed
 }
 
 func isSimpleIdentifier(s string) bool {
