@@ -28,7 +28,7 @@ func TestIntegration_KeyPairAuth(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	token, err := BearerToken(ctx, cfg)
+	token, _, err := BearerToken(ctx, cfg)
 	if err != nil {
 		t.Fatalf("BearerToken: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestIntegration_InvalidKeyPairAuth(t *testing.T) {
 	ctx := context.Background()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := BearerToken(ctx, tt.cfg)
+			_, _, err := BearerToken(ctx, tt.cfg)
 			if tt.wantErr {
 				if err == nil {
 					t.Error("Expected error but got nil")
@@ -207,7 +207,7 @@ func TestIntegration_UnsupportedAuthenticator(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	_, err := BearerToken(ctx, cfg)
+	_, _, err := BearerToken(ctx, cfg)
 	if err == nil {
 		t.Error("Expected error for unsupported authenticator")
 	}
