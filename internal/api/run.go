@@ -147,12 +147,12 @@ func (c *Client) RunAgent(ctx context.Context, db, schema, name string, req RunA
 	}
 
 	// Set authorization header
-	authHeader, err := auth.AuthHeader(ctx, c.authCfg)
+	token, tokenType, err := auth.BearerToken(ctx, c.authCfg)
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Authorization", authHeader)
-	httpReq.Header.Set("X-Snowflake-Authorization-Token-Type", "KEYPAIR_JWT")
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+	httpReq.Header.Set("X-Snowflake-Authorization-Token-Type", tokenType)
 	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("User-Agent", c.userAgent)
