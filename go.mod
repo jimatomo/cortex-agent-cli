@@ -3,6 +3,7 @@ module coragent
 go 1.23.0
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/fatih/color v1.17.0
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/spf13/cobra v1.8.1
@@ -12,7 +13,6 @@ require (
 )
 
 require (
-	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
