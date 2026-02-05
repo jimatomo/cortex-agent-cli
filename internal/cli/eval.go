@@ -88,7 +88,7 @@ Agents without an eval section are skipped.`,
 			}
 
 			// 2. Setup auth and client
-			cfg := auth.FromEnv()
+			cfg := auth.LoadConfig(opts.Connection)
 			applyAuthOverrides(&cfg, opts)
 
 			client, err := api.NewClientWithDebug(cfg, opts.Debug)
@@ -103,7 +103,7 @@ Agents without an eval section are skipped.`,
 
 			// 3. Evaluate each agent
 			for _, item := range evalSpecs {
-				target, err := ResolveTarget(item.Spec, opts)
+				target, err := ResolveTarget(item.Spec, opts, cfg)
 				if err != nil {
 					return fmt.Errorf("%s: %w", item.Path, err)
 				}

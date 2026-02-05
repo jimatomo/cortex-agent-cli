@@ -61,6 +61,10 @@ func runLogin(ctx context.Context, rootOpts *RootOptions, opts *loginOptions) er
 		account = os.Getenv("SNOWFLAKE_ACCOUNT")
 	}
 	if account == "" {
+		cfg := auth.LoadConfig(rootOpts.Connection)
+		account = cfg.Account
+	}
+	if account == "" {
 		return fmt.Errorf("account is required; use --account flag or set SNOWFLAKE_ACCOUNT")
 	}
 

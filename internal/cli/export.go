@@ -22,7 +22,7 @@ func newExportCmd(opts *RootOptions) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
-			cfg := auth.FromEnv()
+			cfg := auth.LoadConfig(opts.Connection)
 			applyAuthOverrides(&cfg, opts)
 
 			client, err := api.NewClientWithDebug(cfg, opts.Debug)
@@ -30,7 +30,7 @@ func newExportCmd(opts *RootOptions) *cobra.Command {
 				return err
 			}
 
-			target, err := ResolveTargetForExport(opts)
+			target, err := ResolveTargetForExport(opts, cfg)
 			if err != nil {
 				return err
 			}
@@ -64,11 +64,3 @@ func newExportCmd(opts *RootOptions) *cobra.Command {
 	return cmd
 }
 
-func ResolveTargetForExport(opts *RootOptions) (Target, error) {
-	db := firstNonEmpty(opts.Database, os.Getenv("SNOWFLAKE_DATABASE"))
-	schema := firstNonEmpty(opts.Schema, os.Getenv("SNOWFLAKE_SCHEMA"))
-	if db == "" || schema == "" {
-		return Target{}, fmt.Errorf("database/schema is required for export (use --database/--schema or env SNOWFLAKE_DATABASE/SNOWFLAKE_SCHEMA)")
-	}
-	return Target{Database: db, Schema: schema}, nil
-}

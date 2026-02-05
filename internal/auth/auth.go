@@ -27,6 +27,8 @@ type Config struct {
 	User                 string
 	Role                 string
 	Warehouse            string
+	Database             string
+	Schema               string
 	PrivateKey           string
 	PrivateKeyPassphrase string
 	Authenticator        string
@@ -40,8 +42,10 @@ func FromEnv() Config {
 		User:                 os.Getenv("SNOWFLAKE_USER"),
 		Role:                 os.Getenv("SNOWFLAKE_ROLE"),
 		Warehouse:            os.Getenv("SNOWFLAKE_WAREHOUSE"),
+		Database:             os.Getenv("SNOWFLAKE_DATABASE"),
+		Schema:               os.Getenv("SNOWFLAKE_SCHEMA"),
 		PrivateKey:           os.Getenv("SNOWFLAKE_PRIVATE_KEY"),
-		PrivateKeyPassphrase: os.Getenv("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE"),
+		PrivateKeyPassphrase: envOrDefault("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE", os.Getenv("PRIVATE_KEY_PASSPHRASE")),
 		Authenticator:        envOrDefault("SNOWFLAKE_AUTHENTICATOR", AuthenticatorKeyPair),
 		OAuthRedirectURI:     envOrDefault("SNOWFLAKE_OAUTH_REDIRECT_URI", DefaultOAuthRedirectURI),
 	}

@@ -57,7 +57,7 @@ Use --delete to delete a specific thread by ID.`,
 			}
 
 			// Delete and interactive modes need API client
-			cfg := auth.FromEnv()
+			cfg := auth.LoadConfig(opts.Connection)
 			applyAuthOverrides(&cfg, opts)
 
 			client, err := api.NewClientWithDebug(cfg, opts.Debug)

@@ -1,0 +1,222 @@
+package auth
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+)
+
+// SnowflakeConnection represents a [connections.<name>] section in config.toml.
+type SnowflakeConnection struct {
+	Account           string `toml:"account"`
+	User              string `toml:"user"`
+	Role              string `toml:"role"`
+	Warehouse         string `toml:"warehouse"`
+	Database          string `toml:"database"`
+	Schema            string `toml:"schema"`
+	Authenticator     string `toml:"authenticator"`
+	PrivateKeyFile    string `toml:"private_key_file"`
+	PrivateKeyPath    string `toml:"private_key_path"`
+	PrivateKeyRaw     string `toml:"private_key_raw"`
+	OAuthClientID     string `toml:"oauth_client_id"`
+	OAuthClientSecret string `toml:"oauth_client_secret"`
+	OAuthRedirectURI  string `toml:"oauth_redirect_uri"`
+}
+
+// snowflakeConfig represents the top-level structure of config.toml.
+type snowflakeConfig struct {
+	DefaultConnectionName string                         `toml:"default_connection_name"`
+	Connections           map[string]SnowflakeConnection `toml:"connections"`
+}
+
+// findConfigPath locates the Snowflake CLI config.toml file.
+// Search order:
+//  1. $SNOWFLAKE_HOME/config.toml
+//  2. ~/.snowflake/config.toml
+//  3. OS-specific path (Linux: ~/.config/snowflake/config.toml)
+func findConfigPath() string {
+	candidates := []string{}
+
+	if snowHome := os.Getenv("SNOWFLAKE_HOME"); snowHome != "" {
+		candidates = append(candidates, filepath.Join(snowHome, "config.toml"))
+	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, ".snowflake", "config.toml"))
+		if runtime.GOOS == "linux" {
+			candidates = append(candidates, filepath.Join(home, ".config", "snowflake", "config.toml"))
+		}
+	}
+
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// LoadSnowflakeConnection reads the specified connection from config.toml.
+// If connectionName is empty, the default_connection_name from config.toml is used.
+// Returns nil if config.toml is not found or the connection doesn't exist.
+func LoadSnowflakeConnection(connectionName string) (*SnowflakeConnection, error) {
+	path := findConfigPath()
+	if path == "" {
+		return nil, nil
+	}
+
+	var cfg snowflakeConfig
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+
+	if connectionName == "" {
+		connectionName = cfg.DefaultConnectionName
+	}
+	if connectionName == "" {
+		connectionName = os.Getenv("SNOWFLAKE_DEFAULT_CONNECTION_NAME")
+	}
+	if connectionName == "" {
+		return nil, nil
+	}
+
+	conn, ok := cfg.Connections[connectionName]
+	if !ok {
+		return nil, fmt.Errorf("connection %q not found in %s", connectionName, path)
+	}
+	return &conn, nil
+}
+
+// ToAuthConfig converts a SnowflakeConnection to an auth.Config.
+func (c *SnowflakeConnection) ToAuthConfig() (Config, error) {
+	cfg := Config{
+		Account:          c.Account,
+		User:             c.User,
+		Role:             c.Role,
+		Warehouse:        c.Warehouse,
+		Database:         c.Database,
+		Schema:           c.Schema,
+		Authenticator:    mapAuthenticator(c.Authenticator),
+		OAuthRedirectURI: c.OAuthRedirectURI,
+	}
+
+	// Resolve private key: private_key_file → private_key_path → private_key_raw
+	if keyFile := firstNonEmptyStr(c.PrivateKeyFile, c.PrivateKeyPath); keyFile != "" {
+		expanded := expandHome(keyFile)
+		data, err := os.ReadFile(expanded)
+		if err != nil {
+			return Config{}, fmt.Errorf("read private key file %s: %w", expanded, err)
+		}
+		cfg.PrivateKey = string(data)
+	} else if c.PrivateKeyRaw != "" {
+		cfg.PrivateKey = c.PrivateKeyRaw
+	}
+
+	// OAuth defaults
+	if cfg.Authenticator == AuthenticatorOAuth {
+		if c.OAuthClientID != "" || c.OAuthClientSecret != "" {
+			// store in config for later use; the OAuthConfig is built at login/token time
+		}
+	}
+
+	if cfg.OAuthRedirectURI == "" {
+		cfg.OAuthRedirectURI = DefaultOAuthRedirectURI
+	}
+	if cfg.Authenticator == "" {
+		cfg.Authenticator = AuthenticatorKeyPair
+	}
+
+	return cfg, nil
+}
+
+// mapAuthenticator maps Snowflake CLI authenticator names to internal constants.
+func mapAuthenticator(s string) string {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "SNOWFLAKE_JWT":
+		return AuthenticatorKeyPair
+	case "OAUTH_AUTHORIZATION_CODE":
+		return AuthenticatorOAuth
+	case "":
+		return AuthenticatorKeyPair
+	default:
+		return strings.ToUpper(strings.TrimSpace(s))
+	}
+}
+
+// expandHome replaces a leading ~ with the user's home directory.
+func expandHome(path string) string {
+	if !strings.HasPrefix(path, "~") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, path[1:])
+}
+
+// firstNonEmptyStr returns the first non-empty string from the arguments.
+func firstNonEmptyStr(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// LoadConfig loads auth configuration with the following priority:
+//  1. Environment variables (high)
+//  2. Snowflake CLI config.toml (low)
+//
+// CLI flags are applied separately via applyAuthOverrides.
+func LoadConfig(connectionName string) Config {
+	// Start from config.toml as base (errors silently ignored = file not found is OK)
+	base := Config{Authenticator: AuthenticatorKeyPair}
+	if conn, err := LoadSnowflakeConnection(connectionName); err == nil && conn != nil {
+		base, _ = conn.ToAuthConfig()
+	}
+
+	// Overlay environment variables (only if set)
+	overlayEnv(&base)
+
+	return base
+}
+
+// overlayEnv overrides base config fields with environment variables when set.
+func overlayEnv(cfg *Config) {
+	if v := os.Getenv("SNOWFLAKE_ACCOUNT"); v != "" {
+		cfg.Account = v
+	}
+	if v := os.Getenv("SNOWFLAKE_USER"); v != "" {
+		cfg.User = v
+	}
+	if v := os.Getenv("SNOWFLAKE_ROLE"); v != "" {
+		cfg.Role = v
+	}
+	if v := os.Getenv("SNOWFLAKE_WAREHOUSE"); v != "" {
+		cfg.Warehouse = v
+	}
+	if v := os.Getenv("SNOWFLAKE_DATABASE"); v != "" {
+		cfg.Database = v
+	}
+	if v := os.Getenv("SNOWFLAKE_SCHEMA"); v != "" {
+		cfg.Schema = v
+	}
+	if v := os.Getenv("SNOWFLAKE_PRIVATE_KEY"); v != "" {
+		cfg.PrivateKey = v
+	}
+	if v := envOrDefault("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE", os.Getenv("PRIVATE_KEY_PASSPHRASE")); v != "" {
+		cfg.PrivateKeyPassphrase = v
+	}
+	if v := strings.TrimSpace(os.Getenv("SNOWFLAKE_AUTHENTICATOR")); v != "" {
+		cfg.Authenticator = v
+	}
+	if v := strings.TrimSpace(os.Getenv("SNOWFLAKE_OAUTH_REDIRECT_URI")); v != "" {
+		cfg.OAuthRedirectURI = v
+	}
+}

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -52,17 +51,17 @@ Example:
 }
 
 func runAuthStatus(rootOpts *RootOptions, opts *authStatusOptions) error {
+	cfg := auth.LoadConfig(rootOpts.Connection)
+	applyAuthOverrides(&cfg, rootOpts)
+
 	// Determine account
 	account := opts.account
 	if account == "" {
-		account = rootOpts.Account
-	}
-	if account == "" {
-		account = os.Getenv("SNOWFLAKE_ACCOUNT")
+		account = cfg.Account
 	}
 
 	// Determine authenticator
-	authenticator := strings.ToUpper(strings.TrimSpace(os.Getenv("SNOWFLAKE_AUTHENTICATOR")))
+	authenticator := cfg.Authenticator
 	if authenticator == "" {
 		authenticator = auth.AuthenticatorKeyPair
 	}
@@ -84,7 +83,7 @@ func runAuthStatus(rootOpts *RootOptions, opts *authStatusOptions) error {
 
 	switch authenticator {
 	case auth.AuthenticatorKeyPair:
-		return showKeyPairStatus()
+		return showKeyPairStatus(cfg)
 	case auth.AuthenticatorOAuth:
 		return showOAuthStatus(account)
 	default:
@@ -94,21 +93,18 @@ func runAuthStatus(rootOpts *RootOptions, opts *authStatusOptions) error {
 	return nil
 }
 
-func showKeyPairStatus() error {
-	privateKey := os.Getenv("SNOWFLAKE_PRIVATE_KEY")
-	user := os.Getenv("SNOWFLAKE_USER")
-
-	if privateKey == "" {
+func showKeyPairStatus(cfg auth.Config) error {
+	if cfg.PrivateKey == "" {
 		fmt.Println("Status:  Not configured")
 		fmt.Println()
 		fmt.Println("Missing: SNOWFLAKE_PRIVATE_KEY")
-	} else if user == "" {
+	} else if cfg.User == "" {
 		fmt.Println("Status:  Not configured")
 		fmt.Println()
 		fmt.Println("Missing: SNOWFLAKE_USER")
 	} else {
 		fmt.Println("Status:  Configured")
-		fmt.Printf("User:    %s\n", strings.ToUpper(user))
+		fmt.Printf("User:    %s\n", strings.ToUpper(cfg.User))
 	}
 
 	return nil

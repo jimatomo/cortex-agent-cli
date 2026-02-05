@@ -2,10 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"coragent/internal/agent"
+	"coragent/internal/auth"
 )
 
 type Target struct {
@@ -13,12 +13,21 @@ type Target struct {
 	Schema   string
 }
 
-func ResolveTarget(spec agent.AgentSpec, opts *RootOptions) (Target, error) {
-	db := firstNonEmpty(opts.Database, deployValue(spec, "database"), os.Getenv("SNOWFLAKE_DATABASE"))
-	schema := firstNonEmpty(opts.Schema, deployValue(spec, "schema"), os.Getenv("SNOWFLAKE_SCHEMA"))
+func ResolveTarget(spec agent.AgentSpec, opts *RootOptions, cfg auth.Config) (Target, error) {
+	db := firstNonEmpty(opts.Database, deployValue(spec, "database"), cfg.Database)
+	schema := firstNonEmpty(opts.Schema, deployValue(spec, "schema"), cfg.Schema)
 
 	if db == "" || schema == "" {
 		return Target{}, fmt.Errorf("database/schema is required (use --database/--schema, YAML deploy.database/schema, or env SNOWFLAKE_DATABASE/SNOWFLAKE_SCHEMA)")
+	}
+	return Target{Database: db, Schema: schema}, nil
+}
+
+func ResolveTargetForExport(opts *RootOptions, cfg auth.Config) (Target, error) {
+	db := firstNonEmpty(opts.Database, cfg.Database)
+	schema := firstNonEmpty(opts.Schema, cfg.Schema)
+	if db == "" || schema == "" {
+		return Target{}, fmt.Errorf("database/schema is required for export (use --database/--schema or env SNOWFLAKE_DATABASE/SNOWFLAKE_SCHEMA)")
 	}
 	return Target{Database: db, Schema: schema}, nil
 }

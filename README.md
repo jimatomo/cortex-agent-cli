@@ -58,9 +58,38 @@ go build -o coragent ./cmd/coragent
 
 ### 1) Configure credentials
 
-Choose one of two authentication methods:
+Choose one of the following authentication methods:
 
-**Option A: OAuth (Recommended for interactive use)**
+**Option A: Snowflake CLI config.toml (Recommended)**
+
+Use `~/.snowflake/config.toml` — the same configuration file used by Snowflake CLI and the Snowflake Python connector.
+
+```toml
+default_connection_name = "myconn"
+
+[connections.myconn]
+account = "your_account"
+user = "your_user"
+role = "CORTEX_USER"
+database = "MY_DATABASE"
+schema = "MY_SCHEMA"
+authenticator = "SNOWFLAKE_JWT"
+private_key_file = "~/.snowflake/rsa_key.p8"
+```
+
+Then simply run:
+
+```bash
+coragent plan
+```
+
+To use a specific named connection:
+
+```bash
+coragent plan --connection myconn
+```
+
+**Option B: OAuth (Recommended for interactive use)**
 
 ```bash
 export SNOWFLAKE_ACCOUNT=your_account
@@ -72,7 +101,7 @@ coragent login
 export SNOWFLAKE_AUTHENTICATOR=OAUTH
 ```
 
-**Option B: Key Pair (Recommended for CI/CD)**
+**Option C: Key Pair via environment variables (Recommended for CI/CD)**
 
 ```bash
 export SNOWFLAKE_ACCOUNT=your_account
@@ -84,6 +113,7 @@ export SNOWFLAKE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----
 -----END PRIVATE KEY-----"
 # If the private key is encrypted, also set the passphrase
 # export SNOWFLAKE_PRIVATE_KEY_PASSPHRASE=your_passphrase
+# (PRIVATE_KEY_PASSPHRASE is also supported as a fallback)
 ```
 
 ### 2) Define an agent in YAML
@@ -130,9 +160,51 @@ coragent apply
 
 Settings are resolved in the following order (highest priority first):
 
-1. CLI flags: `--database`, `--schema`
-2. YAML `deploy` section
-3. Environment variables: `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA`
+1. CLI flags: `--database`, `--schema`, `--role`, `--account`, `--connection`
+2. YAML `deploy` section (database/schema only)
+3. Environment variables: `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA`, etc.
+4. Snowflake CLI config.toml (`~/.snowflake/config.toml`)
+
+### Snowflake CLI config.toml
+
+The CLI reads `~/.snowflake/config.toml` — the same configuration file used by Snowflake CLI (`snow`) and the Snowflake Python connector. The file is searched in the following order:
+
+1. `$SNOWFLAKE_HOME/config.toml`
+2. `~/.snowflake/config.toml`
+3. `~/.config/snowflake/config.toml` (Linux only)
+
+Example config:
+
+```toml
+default_connection_name = "myconn"
+
+[connections.myconn]
+account = "your_account"
+user = "your_user"
+role = "CORTEX_USER"
+database = "MY_DATABASE"
+schema = "MY_SCHEMA"
+authenticator = "SNOWFLAKE_JWT"
+private_key_file = "~/.snowflake/rsa_key.p8"
+```
+
+Use the `--connection` / `-c` flag to select a named connection. If omitted, the value of `default_connection_name` in config.toml (or the `SNOWFLAKE_DEFAULT_CONNECTION_NAME` environment variable) is used.
+
+#### Supported config.toml fields
+
+| Field | Description |
+|-------|-------------|
+| `account` | Snowflake account identifier |
+| `user` | Snowflake user name |
+| `role` | Snowflake role |
+| `warehouse` | Snowflake warehouse |
+| `database` | Default database |
+| `schema` | Default schema |
+| `authenticator` | Auth method: `SNOWFLAKE_JWT` (key pair) or `OAUTH_AUTHORIZATION_CODE` |
+| `private_key_file` | Path to private key file (supports `~` expansion) |
+| `private_key_path` | Alias for `private_key_file` |
+| `private_key_raw` | Private key content inline |
+| `oauth_redirect_uri` | OAuth redirect URI |
 
 ## OAuth Authentication (Experimental)
 
@@ -232,6 +304,7 @@ coragent logout --all
 - `--database` / `-d`: Target database
 - `--schema` / `-s`: Target schema
 - `--role` / `-r`: Snowflake role to use
+- `--connection` / `-c`: Snowflake CLI connection name (from `~/.snowflake/config.toml`)
 - `--debug`: Enable debug logging with stack trace
 
 ## Plan/Apply Behavior

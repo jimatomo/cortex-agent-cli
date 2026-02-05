@@ -33,7 +33,7 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 				return err
 			}
 
-			cfg := auth.FromEnv()
+			cfg := auth.LoadConfig(opts.Connection)
 			applyAuthOverrides(&cfg, opts)
 
 			client, err := api.NewClientWithDebug(cfg, opts.Debug)
@@ -43,7 +43,7 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 
 			var createCount, updateCount, noChangeCount int
 			for _, item := range specs {
-				target, err := ResolveTarget(item.Spec, opts)
+				target, err := ResolveTarget(item.Spec, opts, cfg)
 				if err != nil {
 					return fmt.Errorf("%s: %w", item.Path, err)
 				}
@@ -158,6 +158,12 @@ func applyAuthOverrides(cfg *auth.Config, opts *RootOptions) {
 	}
 	if strings.TrimSpace(opts.Role) != "" {
 		cfg.Role = strings.ToUpper(strings.TrimSpace(opts.Role))
+	}
+	if strings.TrimSpace(opts.Database) != "" {
+		cfg.Database = strings.TrimSpace(opts.Database)
+	}
+	if strings.TrimSpace(opts.Schema) != "" {
+		cfg.Schema = strings.TrimSpace(opts.Schema)
 	}
 }
 

@@ -9,11 +9,12 @@ import (
 )
 
 type RootOptions struct {
-	Account  string
-	Database string
-	Schema   string
-	Role     string
-	Debug    bool
+	Account    string
+	Database   string
+	Schema     string
+	Role       string
+	Connection string
+	Debug      bool
 }
 
 var DebugEnabled bool
@@ -35,6 +36,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVarP(&opts.Database, "database", "d", "", "Target database")
 	cmd.PersistentFlags().StringVarP(&opts.Schema, "schema", "s", "", "Target schema")
 	cmd.PersistentFlags().StringVarP(&opts.Role, "role", "r", "", "Snowflake role to use (e.g., CORTEX_USER)")
+	cmd.PersistentFlags().StringVarP(&opts.Connection, "connection", "c", "", "Snowflake CLI connection name (from ~/.snowflake/config.toml)")
 	cmd.PersistentFlags().BoolVar(&opts.Debug, "debug", false, "Enable debug logging with trace output")
 
 	cmd.AddCommand(

@@ -65,7 +65,7 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentName := args[0]
 
-			cfg := auth.FromEnv()
+			cfg := auth.LoadConfig(opts.Connection)
 			applyAuthOverrides(&cfg, opts)
 
 			client, err := api.NewClientWithDebug(cfg, opts.Debug)
@@ -73,7 +73,7 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
 				return err
 			}
 
-			target, err := ResolveTargetForExport(opts)
+			target, err := ResolveTargetForExport(opts, cfg)
 			if err != nil {
 				return err
 			}

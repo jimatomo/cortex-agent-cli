@@ -41,7 +41,7 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 				return err
 			}
 
-			cfg := auth.FromEnv()
+			cfg := auth.LoadConfig(opts.Connection)
 			applyAuthOverrides(&cfg, opts)
 
 			client, err := api.NewClientWithDebug(cfg, opts.Debug)
@@ -52,7 +52,7 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 			var planItems []deleteItem
 			var deleteCount, notFoundCount int
 			for _, item := range specs {
-				target, err := ResolveTarget(item.Spec, opts)
+				target, err := ResolveTarget(item.Spec, opts, cfg)
 				if err != nil {
 					return fmt.Errorf("%s: %w", item.Path, err)
 				}
