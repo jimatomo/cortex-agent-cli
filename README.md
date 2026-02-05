@@ -29,8 +29,8 @@ Options:
 # Install specific version
 curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- -v v0.1.0
 
-# Install to custom directory (e.g., /usr/local/bin)
-curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- -d /usr/local/bin
+# Install to custom directory (e.g., ~/local/bin)
+curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- -d ~/.local/bin
 
 # Force reinstall (even if same version exists)
 curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- --force
@@ -40,7 +40,7 @@ The script automatically:
 - Detects your OS (macOS/Linux) and architecture (amd64/arm64)
 - Downloads the latest release from GitHub
 - Verifies checksum for security
-- Installs to `~/.local/bin` by default
+- Installs to `/usr/local/bin` by default
 
 ### Manual Download
 

@@ -16,7 +16,7 @@ GITHUB_API="https://api.github.com"
 GITHUB_RELEASES="https://github.com/${REPO}/releases"
 
 # Default values
-INSTALL_DIR="${HOME}/.local/bin"
+INSTALL_DIR="/usr/local/bin"
 VERSION=""
 VERBOSE=0
 FORCE=0
