@@ -12,6 +12,7 @@ import (
 	"coragent/internal/agent"
 	"coragent/internal/api"
 	"coragent/internal/auth"
+	"coragent/internal/config"
 
 	"github.com/spf13/cobra"
 )
@@ -94,6 +95,14 @@ Agents without an eval section are skipped.`,
 			client, err := api.NewClientWithDebug(cfg, opts.Debug)
 			if err != nil {
 				return err
+			}
+
+			// Apply config file output dir if flag not explicitly set
+			if !cmd.Flags().Changed("output-dir") {
+				appCfg := config.LoadCoragentConfig()
+				if appCfg.Eval.OutputDir != "" {
+					outputDir = appCfg.Eval.OutputDir
+				}
 			}
 
 			// Ensure output directory exists

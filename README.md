@@ -383,6 +383,32 @@ coragent run my-agent -m "Query" --show-tools --debug
 | `--show-thinking` | Display reasoning tokens on stderr |
 | `--show-tools` | Display tool usage on stderr |
 
+## Project Configuration (`.coragent.toml`)
+
+You can configure coragent behavior using a `.coragent.toml` file. The file is searched in the following order:
+
+1. `.coragent.toml` in the current directory (project root)
+2. `~/.coragent/config.toml`
+
+If no file is found, default values are used.
+
+### Example
+
+```toml
+[eval]
+output_dir = "./eval-results"
+```
+
+### Supported fields
+
+| Section | Field | Description |
+|---------|-------|-------------|
+| `[eval]` | `output_dir` | Default output directory for eval reports |
+
+### Priority
+
+Settings from `.coragent.toml` are overridden by CLI flags. For example, `-o ./other-dir` takes precedence over `output_dir` in the config file.
+
 ## Eval
 
 Evaluate agent accuracy by running test cases defined in the YAML spec file's `eval` section. Each test sends a question to the agent and verifies that the expected tools were used.
@@ -428,6 +454,12 @@ Two report files are generated per agent:
 - **`{agent_name}_eval.json`** - Machine-readable results with full response text
 - **`{agent_name}_eval.md`** - Markdown report with summary table and collapsible details
 
+The output directory is resolved in the following order:
+
+1. `-o` / `--output-dir` CLI flag
+2. `eval.output_dir` in `.coragent.toml`
+3. Default: `.` (current directory)
+
 ### Result Icons
 
 | Icon | Meaning |
@@ -440,7 +472,7 @@ Two report files are generated per agent:
 
 | Flag | Description |
 |------|-------------|
-| `-o, --output-dir` | Output directory for reports (default: `.`) |
+| `-o, --output-dir` | Output directory for reports (default: `.`, or value from `.coragent.toml`) |
 | `-R, --recursive` | Recursively load agents from subdirectories |
 
 ## Threads
