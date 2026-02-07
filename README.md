@@ -291,7 +291,7 @@ coragent logout --all
 | `coragent apply [path]` | Apply changes to agents (default: `.`) |
 | `coragent validate [path]` | Validate YAML files only (default: `.`) |
 | `coragent export <agent-name>` | Export existing agent to YAML |
-| `coragent run <agent-name>` | Run an agent with streaming response |
+| `coragent run [agent-name]` | Run an agent with streaming response (interactive selection if omitted) |
 | `coragent eval [path]` | Evaluate agent accuracy using test cases (default: `.`) |
 | `coragent threads` | Manage conversation threads |
 | `coragent login` | Authenticate with Snowflake using OAuth |
@@ -327,10 +327,22 @@ coragent export my-agent --out ./my-agent.yaml
 
 Run an agent interactively with streaming response and conversation thread support.
 
+If agent-name is omitted, you'll be prompted to select from available agents.
+If `-m` is omitted, you'll be prompted to enter a message interactively.
+
 ### Basic Usage
 
 ```bash
-# Run with interactive thread selection
+# Fully interactive (select agent, then enter message)
+coragent run
+
+# Interactive agent selection with message
+coragent run -m "What are the top sales by region?"
+
+# Specify agent, enter message interactively
+coragent run my-agent
+
+# Specify both agent and message
 coragent run my-agent -m "What are the top sales by region?"
 
 # Start a new conversation thread
@@ -376,7 +388,7 @@ coragent run my-agent -m "Query" --show-tools --debug
 
 | Flag | Description |
 |------|-------------|
-| `-m, --message` | Message to send to the agent (required) |
+| `-m, --message` | Message to send to the agent (interactive prompt if omitted) |
 | `--new` | Start a new conversation thread |
 | `--thread <id>` | Continue a specific thread by ID |
 | `--without-thread` | Run without thread support (single-turn) |

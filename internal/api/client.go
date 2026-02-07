@@ -122,21 +122,21 @@ func (c *Client) agentsURL(db, schema string) string {
 	return u.String()
 }
 
-type agentListItem struct {
+type AgentListItem struct {
 	Name    string `json:"name"`
 	Comment string `json:"comment"`
 }
 
-func (c *Client) listAgents(ctx context.Context, db, schema string) ([]agentListItem, error) {
-	var out []agentListItem
+func (c *Client) ListAgents(ctx context.Context, db, schema string) ([]AgentListItem, error) {
+	var out []AgentListItem
 	if err := c.doJSON(ctx, http.MethodGet, c.agentsURL(db, schema), nil, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *Client) findAgentListEntry(ctx context.Context, db, schema, name string) (*agentListItem, error) {
-	items, err := c.listAgents(ctx, db, schema)
+func (c *Client) findAgentListEntry(ctx context.Context, db, schema, name string) (*AgentListItem, error) {
+	items, err := c.ListAgents(ctx, db, schema)
 	if err != nil {
 		return nil, err
 	}

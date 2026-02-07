@@ -30,9 +30,12 @@ func newRunCmd(opts *RootOptions) *cobra.Command {
 	var withoutThread bool
 
 	cmd := &cobra.Command{
-		Use:   "run <agent-name>",
+		Use:   "run [agent-name]",
 		Short: "Run an agent with a message",
 		Long: `Run a Cortex Agent and stream the response in real-time.
+
+If agent-name is omitted, you'll be prompted to select from available agents.
+If -m is omitted, you'll be prompted to enter a message interactively.
 
 The agent's response is streamed to stdout as it is generated.
 Use --show-thinking to display reasoning tokens on stderr.
@@ -41,7 +44,16 @@ Use --show-tools to display tool usage on stderr.
 By default, you'll be prompted to select from existing conversation threads
 or create a new one. Use --new to skip selection and start fresh, --thread
 to continue a specific thread, or --without-thread for single-turn mode.`,
-		Example: `  # Basic usage (interactive thread selection)
+		Example: `  # Fully interactive (select agent, then enter message)
+  coragent run
+
+  # Interactive agent selection with message
+  coragent run -m "What are the top sales by region?"
+
+  # Specify agent, enter message interactively
+  coragent run my-agent
+
+  # Specify both agent and message
   coragent run my-agent -m "What are the top sales by region?"
 
   # Start a new conversation thread
@@ -61,10 +73,8 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
 
   # Show tool usage
   coragent run my-agent -m "Query data" --show-tools`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			agentName := args[0]
-
 			cfg := auth.LoadConfig(opts.Connection)
 			applyAuthOverrides(&cfg, opts)
 
@@ -79,6 +89,38 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			defer cancel()
+
+			// Determine agent name
+			var agentName string
+			if len(args) == 1 {
+				agentName = args[0]
+			} else {
+				agents, err := client.ListAgents(ctx, target.Database, target.Schema)
+				if err != nil {
+					return fmt.Errorf("list agents: %w", err)
+				}
+				if len(agents) == 0 {
+					return fmt.Errorf("no agents found in %s.%s", target.Database, target.Schema)
+				}
+				agentName = selectAgent(agents)
+			}
+
+			// Prompt for message if not provided via flag
+			if message == "" {
+				fmt.Fprintf(os.Stderr, "Enter message: ")
+				reader := bufio.NewReader(os.Stdin)
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					return fmt.Errorf("read message: %w", err)
+				}
+				message = strings.TrimSpace(line)
+				if message == "" {
+					return fmt.Errorf("message cannot be empty")
+				}
+			}
+
+			ctx, cancel = context.WithTimeout(context.Background(), 15*time.Minute)
 			defer cancel()
 
 			// Determine thread settings
@@ -234,8 +276,7 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
 		},
 	}
 
-	cmd.Flags().StringVarP(&message, "message", "m", "", "Message to send to the agent (required)")
-	cmd.MarkFlagRequired("message")
+	cmd.Flags().StringVarP(&message, "message", "m", "", "Message to send to the agent (omit for interactive input)")
 	cmd.Flags().BoolVar(&showThinking, "show-thinking", false, "Display reasoning tokens on stderr")
 	cmd.Flags().BoolVar(&showTools, "show-tools", false, "Display tool usage on stderr")
 	cmd.Flags().BoolVar(&newThread, "new", false, "Start a new conversation thread")
@@ -366,6 +407,31 @@ func selectThread(threads []thread.ThreadState, agentName string) *thread.Thread
 		return nil // Create new thread
 	}
 	return &threads[selection-1]
+}
+
+// selectAgent shows interactive agent selection UI.
+func selectAgent(agents []api.AgentListItem) string {
+	fmt.Fprintf(os.Stderr, "Available agents:\n")
+	for i, a := range agents {
+		if a.Comment != "" {
+			fmt.Fprintf(os.Stderr, "  [%d] %s - \"%s\"\n", i+1, a.Name, truncateDisplay(a.Comment, 50))
+		} else {
+			fmt.Fprintf(os.Stderr, "  [%d] %s\n", i+1, a.Name)
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "Select agent [1-%d]: ", len(agents))
+
+	reader := bufio.NewReader(os.Stdin)
+	line, _ := reader.ReadString('\n')
+	line = strings.TrimSpace(line)
+
+	selection, err := strconv.Atoi(line)
+	if err != nil || selection < 1 || selection > len(agents) {
+		// Default to first agent
+		return agents[0].Name
+	}
+	return agents[selection-1].Name
 }
 
 // formatAge formats a time as a human-readable relative duration.
