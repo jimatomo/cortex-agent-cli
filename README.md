@@ -373,15 +373,14 @@ Thread state is stored locally in `~/.coragent/threads.json` to track:
 
 ### Display Options
 
+Tool usage (SQL queries, search calls, etc.) is always displayed on stderr automatically.
+
 ```bash
 # Show agent's reasoning/thinking process
 coragent run my-agent -m "Complex query" --show-thinking
 
-# Show tool usage (SQL queries, search calls, etc.)
-coragent run my-agent -m "Query data" --show-tools
-
-# Combine with debug for full details
-coragent run my-agent -m "Query" --show-tools --debug
+# Combine with debug for full tool input/output details
+coragent run my-agent -m "Query" --debug
 ```
 
 ### Run Flags
@@ -393,7 +392,6 @@ coragent run my-agent -m "Query" --show-tools --debug
 | `--thread <id>` | Continue a specific thread by ID |
 | `--without-thread` | Run without thread support (single-turn) |
 | `--show-thinking` | Display reasoning tokens on stderr |
-| `--show-tools` | Display tool usage on stderr |
 
 ## Project Configuration (`.coragent.toml`)
 
