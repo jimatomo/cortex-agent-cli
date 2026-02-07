@@ -1,9 +1,9 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -104,10 +104,11 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
 
 			// Prompt for message if not provided via flag
 			if message == "" {
-				fmt.Fprintf(os.Stderr, "Enter message: ")
-				reader := bufio.NewReader(os.Stdin)
-				line, err := reader.ReadString('\n')
+				line, err := readLine("Enter message: ")
 				if err != nil {
+					if errors.Is(err, errInterrupted) {
+						return nil
+					}
 					return fmt.Errorf("read message: %w", err)
 				}
 				message = strings.TrimSpace(line)
@@ -422,8 +423,7 @@ func selectThread(threads []thread.ThreadState, agentName string) *thread.Thread
 	// Read selection
 	fmt.Fprintf(os.Stderr, "Select thread [1-%d]: ", len(threads)+1)
 
-	reader := bufio.NewReader(os.Stdin)
-	line, _ := reader.ReadString('\n')
+	line, _ := readLine("")
 	line = strings.TrimSpace(line)
 
 	selection, err := strconv.Atoi(line)
@@ -446,8 +446,7 @@ func selectAgent(agents []api.AgentListItem) string {
 
 	fmt.Fprintf(os.Stderr, "Select agent [1-%d]: ", len(agents))
 
-	reader := bufio.NewReader(os.Stdin)
-	line, _ := reader.ReadString('\n')
+	line, _ := readLine("")
 	line = strings.TrimSpace(line)
 
 	selection, err := strconv.Atoi(line)
