@@ -11,6 +11,7 @@ import (
 	"coragent/internal/agent"
 	"coragent/internal/api"
 	"coragent/internal/auth"
+	"coragent/internal/config"
 	"coragent/internal/diff"
 	"coragent/internal/grant"
 
@@ -29,6 +30,7 @@ type applyItem struct {
 func newApplyCmd(opts *RootOptions) *cobra.Command {
 	var autoApprove bool
 	var recursive bool
+	var runEval bool
 	cmd := &cobra.Command{
 		Use:   "apply [path]",
 		Short: "Apply agent changes",
@@ -154,6 +156,7 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 				}
 			}
 
+			var appliedItems []applyItem
 			for _, item := range planItems {
 				if !item.Exists {
 					color.New(color.FgGreen).Fprintf(os.Stdout, "Creating %s...\n", item.Parsed.Spec.Name)
@@ -164,6 +167,7 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 					if err := applyGrants(context.Background(), client, item.Target, item.Parsed.Spec, true); err != nil {
 						return fmt.Errorf("grant error: %w", err)
 					}
+					appliedItems = append(appliedItems, item)
 					continue
 				}
 
@@ -188,6 +192,44 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 				if err := applyGrants(context.Background(), client, item.Target, item.Parsed.Spec, true); err != nil {
 					return fmt.Errorf("grant error: %w", err)
 				}
+				appliedItems = append(appliedItems, item)
+			}
+
+			if !runEval {
+				return nil
+			}
+
+			// Filter applied agents that have eval tests
+			var evalItems []applyItem
+			for _, item := range appliedItems {
+				if item.Parsed.Spec.Eval != nil && len(item.Parsed.Spec.Eval.Tests) > 0 {
+					evalItems = append(evalItems, item)
+				}
+			}
+			if len(evalItems) == 0 {
+				fmt.Fprintln(os.Stdout, "No eval tests defined for changed agents.")
+				return nil
+			}
+
+			// Resolve eval output directory
+			appCfg := config.LoadCoragentConfig()
+			outputDir := "."
+			if appCfg.Eval.OutputDir != "" {
+				outputDir = appCfg.Eval.OutputDir
+			}
+			if err := os.MkdirAll(outputDir, 0o755); err != nil {
+				return fmt.Errorf("create eval output dir: %w", err)
+			}
+
+			// Run eval for each changed agent
+			var evalErrors []string
+			for _, item := range evalItems {
+				if err := runEvalForAgent(client, item.Target, item.Parsed.Spec, outputDir); err != nil {
+					evalErrors = append(evalErrors, fmt.Sprintf("%s: %v", item.Parsed.Spec.Name, err))
+				}
+			}
+			if len(evalErrors) > 0 {
+				return fmt.Errorf("apply succeeded but eval failed:\n  %s", strings.Join(evalErrors, "\n  "))
 			}
 
 			return nil
@@ -195,6 +237,7 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&autoApprove, "yes", "y", false, "Skip confirmation prompt")
 	cmd.Flags().BoolVarP(&recursive, "recursive", "R", false, "Recursively load agents from subdirectories")
+	cmd.Flags().BoolVar(&runEval, "eval", false, "Run eval tests for changed agents after apply")
 	return cmd
 }
 
