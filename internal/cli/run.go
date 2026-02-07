@@ -24,7 +24,6 @@ import (
 func newRunCmd(opts *RootOptions) *cobra.Command {
 	var message string
 	var showThinking bool
-	var showTools bool
 	var newThread bool
 	var threadID string
 	var withoutThread bool
@@ -38,8 +37,8 @@ If agent-name is omitted, you'll be prompted to select from available agents.
 If -m is omitted, you'll be prompted to enter a message interactively.
 
 The agent's response is streamed to stdout as it is generated.
+Tool usage is displayed on stderr automatically.
 Use --show-thinking to display reasoning tokens on stderr.
-Use --show-tools to display tool usage on stderr.
 
 By default, you'll be prompted to select from existing conversation threads
 or create a new one. Use --new to skip selection and start fresh, --thread
@@ -69,10 +68,7 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
   coragent run my-agent -d MY_DB -s MY_SCHEMA -m "Summarize Q4 results"
 
   # Show thinking/reasoning
-  coragent run my-agent -m "Complex query" --show-thinking
-
-  # Show tool usage
-  coragent run my-agent -m "Query data" --show-tools`,
+  coragent run my-agent -m "Complex query" --show-thinking`,
 		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := auth.LoadConfig(opts.Connection)
@@ -196,6 +192,9 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
 			cyanColor := color.New(color.FgCyan)
 
 			runOpts := api.RunAgentOptions{
+				OnProgress: func(phase string) {
+					spinner.SetMessage(phase)
+				},
 				OnStatus: func(status, message string) {
 					contentMu.Lock()
 					started := contentStarted
@@ -225,23 +224,26 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
 					}
 				},
 				OnToolUse: func(name string, input json.RawMessage) {
-					if showTools {
-						contentMu.Lock()
-						started := contentStarted
-						contentMu.Unlock()
-						if started {
-							cyanColor.Fprintf(os.Stderr, "\n[Tool: %s]\n", name)
-						} else {
-							// Tool use before content - just update spinner
-							spinner.SetMessage(fmt.Sprintf("Using %s...", name))
-						}
-						if opts.Debug && len(input) > 0 {
-							fmt.Fprintf(os.Stderr, "  Input: %s\n", string(input))
-						}
+					contentMu.Lock()
+					started := contentStarted
+					contentMu.Unlock()
+					if !started {
+						spinner.SetMessage(fmt.Sprintf("Using %s...", name))
+					} else {
+						cyanColor.Fprintf(os.Stderr, "\n[Tool: %s]\n", name)
+					}
+					if opts.Debug && len(input) > 0 {
+						fmt.Fprintf(os.Stderr, "  Input: %s\n", string(input))
 					}
 				},
 				OnToolResult: func(name string, result json.RawMessage) {
-					if showTools && opts.Debug {
+					contentMu.Lock()
+					started := contentStarted
+					contentMu.Unlock()
+					if !started {
+						spinner.SetMessage("Processing results...")
+					}
+					if opts.Debug {
 						fmt.Fprintf(os.Stderr, "  Result (%s): %s\n", name, truncateResult(result))
 					}
 				},
@@ -278,7 +280,6 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
 
 	cmd.Flags().StringVarP(&message, "message", "m", "", "Message to send to the agent (omit for interactive input)")
 	cmd.Flags().BoolVar(&showThinking, "show-thinking", false, "Display reasoning tokens on stderr")
-	cmd.Flags().BoolVar(&showTools, "show-tools", false, "Display tool usage on stderr")
 	cmd.Flags().BoolVar(&newThread, "new", false, "Start a new conversation thread")
 	cmd.Flags().StringVar(&threadID, "thread", "", "Continue a specific thread by ID")
 	cmd.Flags().BoolVar(&withoutThread, "without-thread", false, "Run without thread support (single-turn)")
@@ -298,13 +299,15 @@ func truncateResult(data json.RawMessage) string {
 
 // spinner provides a simple terminal spinner with status message.
 type spinner struct {
-	frames   []string
-	message  string
-	mu       sync.Mutex
-	stop     chan struct{}
-	stopped  bool
-	isTTY    bool
-	msgColor *color.Color
+	frames    []string
+	message   string
+	mu        sync.Mutex
+	stop      chan struct{}
+	stopped   bool
+	isTTY     bool
+	msgColor  *color.Color
+	dimColor  *color.Color
+	startTime time.Time
 }
 
 func newSpinner() *spinner {
@@ -314,6 +317,7 @@ func newSpinner() *spinner {
 		stop:     make(chan struct{}),
 		isTTY:    term.IsTerminal(int(os.Stderr.Fd())),
 		msgColor: color.New(color.FgCyan),
+		dimColor: color.New(color.FgHiBlack),
 	}
 }
 
@@ -324,6 +328,8 @@ func (s *spinner) SetMessage(msg string) {
 }
 
 func (s *spinner) Start() {
+	s.startTime = time.Now()
+
 	if !s.isTTY {
 		// Non-TTY: just print initial message
 		fmt.Fprintf(os.Stderr, "%s\n", s.message)
@@ -350,12 +356,30 @@ func (s *spinner) Start() {
 				}
 
 				frame := s.frames[i%len(s.frames)]
-				// Clear line and print spinner with message
-				fmt.Fprintf(os.Stderr, "\r\033[K%s %s", s.msgColor.Sprint(frame), msg)
+				elapsed := time.Since(s.startTime)
+				if elapsed >= 2*time.Second {
+					fmt.Fprintf(os.Stderr, "\r\033[K%s %s %s", s.msgColor.Sprint(frame), msg, s.dimColor.Sprintf("(%s)", formatElapsed(elapsed)))
+				} else {
+					fmt.Fprintf(os.Stderr, "\r\033[K%s %s", s.msgColor.Sprint(frame), msg)
+				}
 				i++
 			}
 		}
 	}()
+}
+
+// formatElapsed formats a duration as a compact elapsed time string.
+func formatElapsed(d time.Duration) string {
+	d = d.Truncate(time.Second)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	m := int(d.Minutes())
+	s := int(d.Seconds()) % 60
+	if s == 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+	return fmt.Sprintf("%dm%ds", m, s)
 }
 
 func (s *spinner) Stop() {

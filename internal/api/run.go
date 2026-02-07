@@ -130,6 +130,7 @@ type RunAgentOptions struct {
 	OnToolUse       func(name string, input json.RawMessage)
 	OnToolResult    func(name string, result json.RawMessage)
 	OnMetadata      func(threadID string, messageID int64)
+	OnProgress      func(phase string) // Called during pre-SSE phases (auth, sending, etc.)
 }
 
 // RunAgent executes an agent with SSE streaming.
@@ -147,6 +148,9 @@ func (c *Client) RunAgent(ctx context.Context, db, schema, name string, req RunA
 	}
 
 	// Set authorization header
+	if opts.OnProgress != nil {
+		opts.OnProgress("Authenticating...")
+	}
 	token, tokenType, err := auth.BearerToken(ctx, c.authCfg)
 	if err != nil {
 		return nil, err
@@ -166,6 +170,9 @@ func (c *Client) RunAgent(ctx context.Context, db, schema, name string, req RunA
 	c.debugf("HTTP POST %s", urlStr)
 	c.debugf("request body: %s", truncateDebug(data))
 
+	if opts.OnProgress != nil {
+		opts.OnProgress("Sending request...")
+	}
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -179,6 +186,9 @@ func (c *Client) RunAgent(ctx context.Context, db, schema, name string, req RunA
 		return nil, APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
 	}
 
+	if opts.OnProgress != nil {
+		opts.OnProgress("Waiting for response...")
+	}
 	return parseSSEStream(resp.Body, opts, c.debug)
 }
 
