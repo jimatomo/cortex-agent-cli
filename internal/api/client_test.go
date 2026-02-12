@@ -45,7 +45,8 @@ func TestIdentifierSegment(t *testing.T) {
 		{"simple", "MY_DB", "MY_DB"},
 		{"with space", "my db", `"my db"`},
 		{"with dash", "my-db", `"my-db"`},
-		{"already quoted", `"MY_DB"`, "MY_DB"},
+		{"already quoted preserved", `"MY_DB"`, `"MY_DB"`},
+		{"pre-quoted mixed case", `"MyDatabase"`, `"MyDatabase"`},
 		{"special chars escaped", "a\"b", `"a""b"`},
 		{"empty", "", `""`},
 		{"underscore start", "_test", "_test"},
@@ -58,6 +59,30 @@ func TestIdentifierSegment(t *testing.T) {
 			got := identifierSegment(tt.value)
 			if got != tt.want {
 				t.Errorf("identifierSegment(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnquoteIdentifier(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"unquoted simple", "MY_DB", "MY_DB"},
+		{"quoted simple", `"MY_DB"`, "MY_DB"},
+		{"quoted mixed case", `"MyDatabase"`, "MyDatabase"},
+		{"whitespace trimmed", "  MY_DB  ", "MY_DB"},
+		{"quoted with whitespace", `  "MY_DB"  `, "MY_DB"},
+		{"empty", "", ""},
+		{"single quote char", `"`, `"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := unquoteIdentifier(tt.value)
+			if got != tt.want {
+				t.Errorf("unquoteIdentifier(%q) = %q, want %q", tt.value, got, tt.want)
 			}
 		})
 	}

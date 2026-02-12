@@ -9,8 +9,9 @@ import (
 )
 
 type Target struct {
-	Database string
-	Schema   string
+	Database         string
+	Schema           string
+	QuoteIdentifiers bool
 }
 
 func ResolveTarget(spec agent.AgentSpec, opts *RootOptions, cfg auth.Config) (Target, error) {
@@ -20,7 +21,14 @@ func ResolveTarget(spec agent.AgentSpec, opts *RootOptions, cfg auth.Config) (Ta
 	if db == "" || schema == "" {
 		return Target{}, fmt.Errorf("database/schema is required (use --database/--schema, YAML deploy.database/schema, or env SNOWFLAKE_DATABASE/SNOWFLAKE_SCHEMA)")
 	}
-	return Target{Database: db, Schema: schema}, nil
+
+	quoteIDs := opts.QuoteIdentifiers || deployBoolValue(spec, "quote_identifiers")
+	if quoteIDs {
+		db = quoteIdentifier(db)
+		schema = quoteIdentifier(schema)
+	}
+
+	return Target{Database: db, Schema: schema, QuoteIdentifiers: quoteIDs}, nil
 }
 
 func ResolveTargetForExport(opts *RootOptions, cfg auth.Config) (Target, error) {
@@ -29,7 +37,23 @@ func ResolveTargetForExport(opts *RootOptions, cfg auth.Config) (Target, error) 
 	if db == "" || schema == "" {
 		return Target{}, fmt.Errorf("database/schema is required for export (use --database/--schema or env SNOWFLAKE_DATABASE/SNOWFLAKE_SCHEMA)")
 	}
-	return Target{Database: db, Schema: schema}, nil
+
+	quoteIDs := opts.QuoteIdentifiers
+	if quoteIDs {
+		db = quoteIdentifier(db)
+		schema = quoteIdentifier(schema)
+	}
+
+	return Target{Database: db, Schema: schema, QuoteIdentifiers: quoteIDs}, nil
+}
+
+// quoteIdentifier wraps a value in double quotes for case-sensitive SQL identifiers.
+// If the value is already quoted, it is returned as-is.
+func quoteIdentifier(value string) string {
+	if len(value) >= 2 && strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
+		return value
+	}
+	return `"` + value + `"`
 }
 
 func deployValue(spec agent.AgentSpec, key string) string {
@@ -43,6 +67,18 @@ func deployValue(spec agent.AgentSpec, key string) string {
 		return strings.TrimSpace(spec.Deploy.Schema)
 	default:
 		return ""
+	}
+}
+
+func deployBoolValue(spec agent.AgentSpec, key string) bool {
+	if spec.Deploy == nil {
+		return false
+	}
+	switch key {
+	case "quote_identifiers":
+		return spec.Deploy.QuoteIdentifiers
+	default:
+		return false
 	}
 }
 

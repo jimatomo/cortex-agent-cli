@@ -58,13 +58,14 @@ func TestDeployValue(t *testing.T) {
 
 func TestResolveTarget(t *testing.T) {
 	tests := []struct {
-		name    string
-		spec    agent.AgentSpec
-		opts    *RootOptions
-		cfg     auth.Config
-		wantDB  string
-		wantSch string
-		wantErr bool
+		name      string
+		spec      agent.AgentSpec
+		opts      *RootOptions
+		cfg       auth.Config
+		wantDB    string
+		wantSch   string
+		wantQuote bool
+		wantErr   bool
 	}{
 		{
 			name:    "opts highest priority",
@@ -111,6 +112,50 @@ func TestResolveTarget(t *testing.T) {
 			cfg:     auth.Config{},
 			wantErr: true,
 		},
+		{
+			name:      "quote_identifiers from CLI flag",
+			spec:      agent.AgentSpec{Deploy: &agent.DeployConfig{Database: "DEPLOY_DB", Schema: "DEPLOY_SCH"}},
+			opts:      &RootOptions{QuoteIdentifiers: true},
+			cfg:       auth.Config{},
+			wantDB:    `"DEPLOY_DB"`,
+			wantSch:   `"DEPLOY_SCH"`,
+			wantQuote: true,
+		},
+		{
+			name:      "quote_identifiers from YAML deploy",
+			spec:      agent.AgentSpec{Deploy: &agent.DeployConfig{Database: "MyDB", Schema: "MySchema", QuoteIdentifiers: true}},
+			opts:      &RootOptions{},
+			cfg:       auth.Config{},
+			wantDB:    `"MyDB"`,
+			wantSch:   `"MySchema"`,
+			wantQuote: true,
+		},
+		{
+			name:      "quote_identifiers CLI flag overrides YAML false",
+			spec:      agent.AgentSpec{Deploy: &agent.DeployConfig{Database: "MyDB", Schema: "MySchema"}},
+			opts:      &RootOptions{QuoteIdentifiers: true},
+			cfg:       auth.Config{},
+			wantDB:    `"MyDB"`,
+			wantSch:   `"MySchema"`,
+			wantQuote: true,
+		},
+		{
+			name:    "no quoting by default",
+			spec:    agent.AgentSpec{Deploy: &agent.DeployConfig{Database: "MyDB", Schema: "MySchema"}},
+			opts:    &RootOptions{},
+			cfg:     auth.Config{},
+			wantDB:  "MyDB",
+			wantSch: "MySchema",
+		},
+		{
+			name:      "already quoted values not double-quoted",
+			spec:      agent.AgentSpec{Deploy: &agent.DeployConfig{Database: `"MyDB"`, Schema: `"MySchema"`, QuoteIdentifiers: true}},
+			opts:      &RootOptions{},
+			cfg:       auth.Config{},
+			wantDB:    `"MyDB"`,
+			wantSch:   `"MySchema"`,
+			wantQuote: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -130,18 +175,22 @@ func TestResolveTarget(t *testing.T) {
 			if got.Schema != tt.wantSch {
 				t.Errorf("Schema = %q, want %q", got.Schema, tt.wantSch)
 			}
+			if got.QuoteIdentifiers != tt.wantQuote {
+				t.Errorf("QuoteIdentifiers = %v, want %v", got.QuoteIdentifiers, tt.wantQuote)
+			}
 		})
 	}
 }
 
 func TestResolveTargetForExport(t *testing.T) {
 	tests := []struct {
-		name    string
-		opts    *RootOptions
-		cfg     auth.Config
-		wantDB  string
-		wantSch string
-		wantErr bool
+		name      string
+		opts      *RootOptions
+		cfg       auth.Config
+		wantDB    string
+		wantSch   string
+		wantQuote bool
+		wantErr   bool
 	}{
 		{
 			name:    "opts priority",
@@ -163,6 +212,14 @@ func TestResolveTargetForExport(t *testing.T) {
 			cfg:     auth.Config{},
 			wantErr: true,
 		},
+		{
+			name:      "quote_identifiers from CLI flag",
+			opts:      &RootOptions{Database: "MyDB", Schema: "MySchema", QuoteIdentifiers: true},
+			cfg:       auth.Config{},
+			wantDB:    `"MyDB"`,
+			wantSch:   `"MySchema"`,
+			wantQuote: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -181,6 +238,52 @@ func TestResolveTargetForExport(t *testing.T) {
 			}
 			if got.Schema != tt.wantSch {
 				t.Errorf("Schema = %q, want %q", got.Schema, tt.wantSch)
+			}
+			if got.QuoteIdentifiers != tt.wantQuote {
+				t.Errorf("QuoteIdentifiers = %v, want %v", got.QuoteIdentifiers, tt.wantQuote)
+			}
+		})
+	}
+}
+
+func TestQuoteIdentifier(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"simple", "MyDB", `"MyDB"`},
+		{"uppercase", "MY_DB", `"MY_DB"`},
+		{"already quoted", `"MyDB"`, `"MyDB"`},
+		{"empty", "", `""`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := quoteIdentifier(tt.value)
+			if got != tt.want {
+				t.Errorf("quoteIdentifier(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeployBoolValue(t *testing.T) {
+	tests := []struct {
+		name string
+		spec agent.AgentSpec
+		key  string
+		want bool
+	}{
+		{"nil deploy", agent.AgentSpec{}, "quote_identifiers", false},
+		{"false", agent.AgentSpec{Deploy: &agent.DeployConfig{}}, "quote_identifiers", false},
+		{"true", agent.AgentSpec{Deploy: &agent.DeployConfig{QuoteIdentifiers: true}}, "quote_identifiers", true},
+		{"unknown key", agent.AgentSpec{Deploy: &agent.DeployConfig{QuoteIdentifiers: true}}, "unknown", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := deployBoolValue(tt.spec, tt.key)
+			if got != tt.want {
+				t.Errorf("deployBoolValue(spec, %q) = %v, want %v", tt.key, got, tt.want)
 			}
 		})
 	}

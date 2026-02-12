@@ -308,6 +308,7 @@ coragent logout --all
 - `--schema` / `-s`: Target schema
 - `--role` / `-r`: Snowflake role to use
 - `--connection` / `-c`: Snowflake CLI connection name (from `~/.snowflake/config.toml`)
+- `--quote-identifiers`: Double-quote database/schema names for case-sensitive identifiers
 - `--debug`: Enable debug logging with stack trace
 
 ## Plan/Apply Behavior
@@ -584,6 +585,7 @@ A complete example showing all supported fields:
 deploy:
   database: MY_DATABASE
   schema: MY_SCHEMA
+  quote_identifiers: true  # Double-quote database/schema for case-sensitive identifiers
   grant:
     account_roles:
       - role: ANALYST
@@ -652,7 +654,7 @@ tool_resources:
 |-------|----------|-------------|
 | `name` | Yes | Agent name |
 | `comment` | No | Agent description |
-| `deploy` | No | Deployment settings (database, schema, grants) |
+| `deploy` | No | Deployment settings (database, schema, quote_identifiers, grants) |
 | `eval` | No | Evaluation test cases (not sent to Snowflake API) |
 | `profile` | No | Agent profile (`display_name`) |
 | `models` | No | Model configuration (`orchestration`: model name) |

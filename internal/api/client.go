@@ -177,8 +177,8 @@ func (c *Client) describeAgent(ctx context.Context, db, schema, name string) (ag
 	stmt := fmt.Sprintf("DESCRIBE AGENT %s.%s.%s", identifierSegment(db), identifierSegment(schema), identifierSegment(name))
 	payload := sqlStatementRequest{
 		Statement: stmt,
-		Database:  db,
-		Schema:    schema,
+		Database:  unquoteIdentifier(db),
+		Schema:    unquoteIdentifier(schema),
 	}
 	if strings.TrimSpace(c.authCfg.Warehouse) != "" {
 		payload.Warehouse = c.authCfg.Warehouse
@@ -385,11 +385,23 @@ func (c *Client) doJSON(ctx context.Context, method, urlStr string, payload any,
 
 func identifierSegment(value string) string {
 	trimmed := strings.TrimSpace(value)
-	if len(trimmed) >= 2 && strings.HasPrefix(trimmed, "\"") && strings.HasSuffix(trimmed, "\"") {
-		trimmed = trimmed[1 : len(trimmed)-1]
+	// Preserve existing double-quotes (user/system explicitly quoted it)
+	if len(trimmed) >= 2 && strings.HasPrefix(trimmed, `"`) && strings.HasSuffix(trimmed, `"`) {
+		inner := trimmed[1 : len(trimmed)-1]
+		return `"` + strings.ReplaceAll(inner, `"`, `""`) + `"`
 	}
 	if !isSimpleIdentifier(trimmed) {
 		trimmed = `"` + strings.ReplaceAll(trimmed, `"`, `""`) + `"`
+	}
+	return trimmed
+}
+
+// unquoteIdentifier strips surrounding double-quotes from a value.
+// Used for sqlStatementRequest payload fields which need raw (unquoted) values.
+func unquoteIdentifier(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) >= 2 && strings.HasPrefix(trimmed, `"`) && strings.HasSuffix(trimmed, `"`) {
+		return trimmed[1 : len(trimmed)-1]
 	}
 	return trimmed
 }
@@ -902,8 +914,8 @@ func (c *Client) ShowGrants(ctx context.Context, db, schema, agentName string) (
 
 	payload := sqlStatementRequest{
 		Statement: stmt,
-		Database:  db,
-		Schema:    schema,
+		Database:  unquoteIdentifier(db),
+		Schema:    unquoteIdentifier(schema),
 	}
 	if strings.TrimSpace(c.authCfg.Warehouse) != "" {
 		payload.Warehouse = c.authCfg.Warehouse
@@ -944,7 +956,7 @@ func (c *Client) ShowGrants(ctx context.Context, db, schema, agentName string) (
 
 		// For DATABASE_ROLE, prefix with database name if not already qualified
 		if grantedTo == "DATABASE_ROLE" && !strings.Contains(grantee, ".") {
-			grantee = db + "." + grantee
+			grantee = unquoteIdentifier(db) + "." + grantee
 		}
 
 		rows = append(rows, ShowGrantsRow{
@@ -976,8 +988,8 @@ func (c *Client) ExecuteGrant(ctx context.Context, db, schema, agentName, roleTy
 
 	payload := sqlStatementRequest{
 		Statement: stmt,
-		Database:  db,
-		Schema:    schema,
+		Database:  unquoteIdentifier(db),
+		Schema:    unquoteIdentifier(schema),
 	}
 	if strings.TrimSpace(c.authCfg.Warehouse) != "" {
 		payload.Warehouse = c.authCfg.Warehouse
@@ -1008,8 +1020,8 @@ func (c *Client) ExecuteRevoke(ctx context.Context, db, schema, agentName, roleT
 
 	payload := sqlStatementRequest{
 		Statement: stmt,
-		Database:  db,
-		Schema:    schema,
+		Database:  unquoteIdentifier(db),
+		Schema:    unquoteIdentifier(schema),
 	}
 	if strings.TrimSpace(c.authCfg.Warehouse) != "" {
 		payload.Warehouse = c.authCfg.Warehouse

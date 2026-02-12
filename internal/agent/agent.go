@@ -14,9 +14,10 @@ type GrantConfig struct {
 
 // DeployConfig contains optional deployment-only settings.
 type DeployConfig struct {
-	Database string       `yaml:"database,omitempty" json:"database,omitempty"`
-	Schema   string       `yaml:"schema,omitempty" json:"schema,omitempty"`
-	Grant    *GrantConfig `yaml:"grant,omitempty" json:"grant,omitempty"`
+	Database         string       `yaml:"database,omitempty" json:"database,omitempty"`
+	Schema           string       `yaml:"schema,omitempty" json:"schema,omitempty"`
+	QuoteIdentifiers bool         `yaml:"quote_identifiers,omitempty" json:"quote_identifiers,omitempty"`
+	Grant            *GrantConfig `yaml:"grant,omitempty" json:"grant,omitempty"`
 }
 
 // EvalConfig contains evaluation test cases.
