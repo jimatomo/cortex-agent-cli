@@ -28,7 +28,8 @@ type EvalConfig struct {
 // EvalTestCase defines a single evaluation test case.
 type EvalTestCase struct {
 	Question      string   `yaml:"question" json:"question"`
-	ExpectedTools []string `yaml:"expected_tools" json:"expected_tools"`
+	ExpectedTools []string `yaml:"expected_tools,omitempty" json:"expected_tools,omitempty"`
+	Command       string   `yaml:"command,omitempty" json:"command,omitempty"`
 }
 
 // AgentSpec represents the Cortex Agent YAML/JSON schema payload.

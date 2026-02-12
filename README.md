@@ -470,7 +470,7 @@ Settings from `.coragent.toml` are overridden by CLI flags. For example, `-o ./o
 
 ## Eval
 
-Evaluate agent accuracy by running test cases defined in the YAML spec file's `eval` section. Each test sends a question to the agent and verifies that the expected tools were used.
+Evaluate agent accuracy by running test cases defined in the YAML spec file's `eval` section. Each test can verify expected tool usage, run a custom command for validation, or both.
 
 ### YAML Definition
 
@@ -479,13 +479,48 @@ Add an `eval` section to your agent spec:
 ```yaml
 eval:
   tests:
+    # Tool matching only
     - question: "Show me the sales data"
       expected_tools:
         - sample_semantic_view
+
+    # Tool matching + custom command
     - question: "Search the Snowflake docs"
       expected_tools:
         - snowflake_docs_service
+      command: "python eval_check.py"
+
+    # Custom command only (no agent call when question is omitted)
+    - command: "python eval_standalone.py"
 ```
+
+### Test Case Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `question` | No | Question to send to the agent. If omitted, the agent call is skipped. |
+| `expected_tools` | No* | List of tool names that must appear in the agent's response |
+| `command` | No* | Shell command to run after the agent responds (or standalone if no question) |
+
+\* At least one of `expected_tools` or `command` is required.
+
+### Custom Command
+
+When `command` is specified, it is executed via `sh -c` with the working directory set to the YAML file's directory. The command receives a JSON payload on stdin:
+
+```json
+{
+  "question": "the question sent to the agent",
+  "response": "the agent's text response",
+  "actual_tools": ["tool_a", "tool_b"],
+  "expected_tools": ["tool_a"],
+  "thread_id": "12345"
+}
+```
+
+- **Exit code 0** = pass, **non-zero** = fail
+- stdout/stderr are captured and included in the report
+- If both `expected_tools` and `command` are specified, both must pass for the test to pass
 
 ### Usage
 
@@ -523,9 +558,9 @@ The output directory is resolved in the following order:
 
 | Icon | Meaning |
 |------|---------|
-| ✅ | All expected tools were used, no extra tool calls |
-| ⚠️ | Expected tools were used, but extra or duplicate tool calls detected (agent may have struggled) |
-| ❌ | Expected tools were not all used |
+| ✅ | Test passed (tool match and/or command succeeded) |
+| ⚠️ | Test passed, but extra or duplicate tool calls detected (agent may have struggled) |
+| ❌ | Test failed (tool mismatch, command failed, or agent error) |
 
 ### Eval Flags
 
@@ -604,6 +639,8 @@ eval:
     - question: "Search the Snowflake docs"
       expected_tools:
         - snowflake_docs_service
+      command: "python eval_check.py"
+    - command: "python eval_standalone.py"
 
 name: my-support-agent
 comment: Customer support agent
@@ -655,7 +692,7 @@ tool_resources:
 | `name` | Yes | Agent name |
 | `comment` | No | Agent description |
 | `deploy` | No | Deployment settings (database, schema, quote_identifiers, grants) |
-| `eval` | No | Evaluation test cases (not sent to Snowflake API) |
+| `eval` | No | Evaluation test cases with tool matching and/or custom commands (not sent to Snowflake API) |
 | `profile` | No | Agent profile (`display_name`) |
 | `models` | No | Model configuration (`orchestration`: model name) |
 | `instructions` | No | Agent instructions |

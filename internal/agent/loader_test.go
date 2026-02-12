@@ -376,6 +376,61 @@ eval:
 	}
 }
 
+func TestLoadAgentRejectsEvalTestWithoutToolsOrCommand(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+eval:
+  tests:
+    - question: "test question"
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	_, err = LoadAgents(path, false)
+	if err == nil {
+		t.Fatal("expected error for eval test without expected_tools or command, got nil")
+	}
+}
+
+func TestLoadAgentWithEvalCommand(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+eval:
+  tests:
+    - question: "test question"
+      command: "python eval.py"
+    - question: "another question"
+      expected_tools:
+        - tool_a
+      command: "python check.py"
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false)
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	if agents[0].Spec.Eval.Tests[0].Command != "python eval.py" {
+		t.Errorf("unexpected command: %s", agents[0].Spec.Eval.Tests[0].Command)
+	}
+	if agents[0].Spec.Eval.Tests[1].Command != "python check.py" {
+		t.Errorf("unexpected command: %s", agents[0].Spec.Eval.Tests[1].Command)
+	}
+	if len(agents[0].Spec.Eval.Tests[1].ExpectedTools) != 1 {
+		t.Errorf("expected 1 expected tool, got %d", len(agents[0].Spec.Eval.Tests[1].ExpectedTools))
+	}
+}
+
 func TestLoadAgentWithAllPrivilege(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "agent.yaml")

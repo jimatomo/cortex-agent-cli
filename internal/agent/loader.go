@@ -134,6 +134,13 @@ func validateAgentSpec(spec AgentSpec) error {
 			return fmt.Errorf("grant: %w", err)
 		}
 	}
+	if spec.Eval != nil {
+		for i, tc := range spec.Eval.Tests {
+			if len(tc.ExpectedTools) == 0 && strings.TrimSpace(tc.Command) == "" {
+				return fmt.Errorf("eval.tests[%d]: expected_tools or command is required", i)
+			}
+		}
+	}
 	return nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"coragent/internal/agent"
@@ -224,7 +225,8 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 			// Run eval for each changed agent
 			var evalErrors []string
 			for _, item := range evalItems {
-				if err := runEvalForAgent(client, item.Target, item.Parsed.Spec, outputDir); err != nil {
+				specDir := filepath.Dir(item.Parsed.Path)
+				if err := runEvalForAgent(client, item.Target, item.Parsed.Spec, outputDir, specDir); err != nil {
 					evalErrors = append(evalErrors, fmt.Sprintf("%s: %v", item.Parsed.Spec.Name, err))
 				}
 			}

@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,13 +22,27 @@ import (
 // EvalResult holds the result of a single evaluation test case.
 type EvalResult struct {
 	Question       string   `json:"question"`
-	ExpectedTools  []string `json:"expected_tools"`
+	ExpectedTools  []string `json:"expected_tools,omitempty"`
 	ActualTools    []string `json:"actual_tools"`
 	ToolMatch      bool     `json:"tool_match"`
 	ExtraToolCalls bool     `json:"extra_tool_calls"`
 	Response       string   `json:"response"`
 	ThreadID       string   `json:"thread_id"`
+	Command        string   `json:"command,omitempty"`
+	CommandPassed  *bool    `json:"command_passed,omitempty"`
+	CommandOutput  string   `json:"command_output,omitempty"`
+	CommandError   string   `json:"command_error,omitempty"`
+	Passed         bool     `json:"passed"`
 	Error          string   `json:"error,omitempty"`
+}
+
+// CommandInput is the JSON payload written to stdin of eval commands.
+type CommandInput struct {
+	Question      string   `json:"question"`
+	Response      string   `json:"response"`
+	ActualTools   []string `json:"actual_tools"`
+	ExpectedTools []string `json:"expected_tools,omitempty"`
+	ThreadID      string   `json:"thread_id"`
 }
 
 // EvalReport holds the full evaluation report.
@@ -117,7 +133,8 @@ Agents without an eval section are skipped.`,
 					return fmt.Errorf("%s: %w", item.Path, err)
 				}
 
-				if err := runEvalForAgent(client, target, item.Spec, outputDir); err != nil {
+				specDir := filepath.Dir(item.Path)
+				if err := runEvalForAgent(client, target, item.Spec, outputDir, specDir); err != nil {
 					return fmt.Errorf("%s: %w", item.Path, err)
 				}
 			}
@@ -132,7 +149,7 @@ Agents without an eval section are skipped.`,
 	return cmd
 }
 
-func runEvalForAgent(client *api.Client, target Target, spec agent.AgentSpec, outputDir string) error {
+func runEvalForAgent(client *api.Client, target Target, spec agent.AgentSpec, outputDir, specDir string) error {
 	report := EvalReport{
 		AgentName:   spec.Name,
 		Database:    target.Database,
@@ -148,7 +165,7 @@ func runEvalForAgent(client *api.Client, target Target, spec agent.AgentSpec, ou
 
 	// Run each test case
 	for i, tc := range tests {
-		result := runEvalTest(client, target, spec.Name, tc, i+1, len(tests))
+		result := runEvalTest(client, target, spec.Name, tc, i+1, len(tests), specDir)
 		report.Results = append(report.Results, result)
 
 		// Write intermediate JSON after each test
@@ -170,7 +187,7 @@ func runEvalForAgent(client *api.Client, target Target, spec agent.AgentSpec, ou
 	// Print summary
 	passed := 0
 	for _, r := range report.Results {
-		if r.ToolMatch {
+		if r.Passed {
 			passed++
 		}
 	}
@@ -181,74 +198,158 @@ func runEvalForAgent(client *api.Client, target Target, spec agent.AgentSpec, ou
 	return nil
 }
 
-func runEvalTest(client *api.Client, target Target, agentName string, tc agent.EvalTestCase, num, total int) EvalResult {
+func runEvalTest(client *api.Client, target Target, agentName string, tc agent.EvalTestCase, num, total int, specDir string) EvalResult {
 	result := EvalResult{
 		Question:      tc.Question,
 		ExpectedTools: tc.ExpectedTools,
 		ActualTools:   []string{},
+		Command:       tc.Command,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
-	// Create a new thread for each test
-	threadID, err := client.CreateThread(ctx)
-	if err != nil {
-		result.Error = fmt.Sprintf("create thread: %v", err)
-		fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ❌ (%s)\n", num, total, tc.Question, result.Error)
-		return result
-	}
-	result.ThreadID = threadID
+	// Run agent only when question is specified
+	if strings.TrimSpace(tc.Question) != "" {
+		threadID, err := client.CreateThread(ctx)
+		if err != nil {
+			result.Error = fmt.Sprintf("create thread: %v", err)
+			result.Passed = false
+			fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ❌ (%s)\n", num, total, tc.Question, result.Error)
+			return result
+		}
+		result.ThreadID = threadID
 
-	zero := int64(0)
-	req := api.RunAgentRequest{
-		Messages: []api.Message{
-			api.NewTextMessage("user", tc.Question),
-		},
-		ThreadID:        threadID,
-		ParentMessageID: &zero,
-	}
+		zero := int64(0)
+		req := api.RunAgentRequest{
+			Messages: []api.Message{
+				api.NewTextMessage("user", tc.Question),
+			},
+			ThreadID:        threadID,
+			ParentMessageID: &zero,
+		}
 
-	// Capture tools and response
-	var toolsUsed []string
-	var responseText strings.Builder
+		var toolsUsed []string
+		var responseText strings.Builder
 
-	runOpts := api.RunAgentOptions{
-		OnToolUse: func(name string, input json.RawMessage) {
-			toolsUsed = append(toolsUsed, name)
-		},
-		OnTextDelta: func(delta string) {
-			responseText.WriteString(delta)
-		},
-	}
+		runOpts := api.RunAgentOptions{
+			OnToolUse: func(name string, input json.RawMessage) {
+				toolsUsed = append(toolsUsed, name)
+			},
+			OnTextDelta: func(delta string) {
+				responseText.WriteString(delta)
+			},
+		}
 
-	_, err = client.RunAgent(ctx, target.Database, target.Schema, agentName, req, runOpts)
-	if err != nil {
-		result.Error = fmt.Sprintf("run agent: %v", err)
+		_, err = client.RunAgent(ctx, target.Database, target.Schema, agentName, req, runOpts)
+		if err != nil {
+			result.Error = fmt.Sprintf("run agent: %v", err)
+		}
+
 		result.ActualTools = toolsUsed
-		result.ToolMatch = checkToolMatch(tc.ExpectedTools, toolsUsed)
 		result.Response = responseText.String()
-		fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ❌ (%s)\n", num, total, tc.Question, result.Error)
-		return result
+		result.ToolMatch = checkToolMatch(tc.ExpectedTools, toolsUsed)
+		result.ExtraToolCalls = hasExtraToolCalls(tc.ExpectedTools, toolsUsed)
 	}
 
-	result.ActualTools = toolsUsed
-	result.Response = responseText.String()
-	result.ToolMatch = checkToolMatch(tc.ExpectedTools, toolsUsed)
-	result.ExtraToolCalls = hasExtraToolCalls(tc.ExpectedTools, toolsUsed)
+	// Run command if specified
+	if tc.Command != "" {
+		input := CommandInput{
+			Question:      tc.Question,
+			Response:      result.Response,
+			ActualTools:   result.ActualTools,
+			ExpectedTools: tc.ExpectedTools,
+			ThreadID:      result.ThreadID,
+		}
+		cmdOut, cmdErr := runEvalCommand(ctx, tc.Command, input, specDir)
+		result.CommandOutput = cmdOut
+		if cmdErr != nil {
+			passed := false
+			result.CommandPassed = &passed
+			result.CommandError = cmdErr.Error()
+		} else {
+			passed := true
+			result.CommandPassed = &passed
+		}
+	}
 
-	if !result.ToolMatch {
-		fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ❌ (expected: %s, actual: %s)\n",
-			num, total, tc.Question,
-			strings.Join(tc.ExpectedTools, ", "),
-			strings.Join(toolsUsed, ", "))
+	result.Passed = computeOverallPass(result, tc)
+
+	// Console output
+	label := tc.Question
+	if label == "" {
+		label = tc.Command
+	}
+	if result.Error != "" {
+		fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ❌ (%s)\n", num, total, label, result.Error)
+	} else if !result.Passed {
+		var reasons []string
+		if len(tc.ExpectedTools) > 0 && !result.ToolMatch {
+			reasons = append(reasons, fmt.Sprintf("expected: %s, actual: %s",
+				strings.Join(tc.ExpectedTools, ", "), strings.Join(result.ActualTools, ", ")))
+		}
+		if result.CommandPassed != nil && !*result.CommandPassed {
+			reasons = append(reasons, fmt.Sprintf("command failed: %s", result.CommandError))
+		}
+		fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ❌ (%s)\n", num, total, label, strings.Join(reasons, "; "))
 	} else if result.ExtraToolCalls {
-		fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ⚠️ (tools: %s) extra tool calls detected\n", num, total, tc.Question, strings.Join(toolsUsed, ", "))
+		fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ⚠️ (tools: %s) extra tool calls detected\n", num, total, label, strings.Join(result.ActualTools, ", "))
 	} else {
-		fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ✅ (tools: %s)\n", num, total, tc.Question, strings.Join(toolsUsed, ", "))
+		fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ✅\n", num, total, label)
+	}
+	if result.CommandOutput != "" {
+		fmt.Fprint(os.Stderr, result.CommandOutput)
+		if !strings.HasSuffix(result.CommandOutput, "\n") {
+			fmt.Fprintln(os.Stderr)
+		}
 	}
 
 	return result
+}
+
+// runEvalCommand executes a command via sh -c, passing input as JSON on stdin.
+func runEvalCommand(ctx context.Context, command string, input CommandInput, workDir string) (string, error) {
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return "", fmt.Errorf("marshal command input: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Dir = workDir
+	cmd.Stdin = bytes.NewReader(inputJSON)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+
+	if err != nil {
+		return output, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return output, nil
+}
+
+// computeOverallPass determines the overall pass/fail for a test case.
+// Both tool match (if expected_tools specified) and command (if specified) must pass.
+func computeOverallPass(result EvalResult, tc agent.EvalTestCase) bool {
+	if result.Error != "" {
+		return false
+	}
+	if len(tc.ExpectedTools) > 0 && !result.ToolMatch {
+		return false
+	}
+	if result.CommandPassed != nil && !*result.CommandPassed {
+		return false
+	}
+	return true
 }
 
 // hasExtraToolCalls returns true if actual tools contain duplicate calls
@@ -303,15 +404,29 @@ func generateEvalMarkdown(report EvalReport) string {
 
 	fmt.Fprintf(&b, "## Agent Evaluation: %s\n\n", report.AgentName)
 
+	// Check if any test has a command
+	hasCommand := false
+	for _, r := range report.Results {
+		if r.Command != "" {
+			hasCommand = true
+			break
+		}
+	}
+
 	// Summary table
-	b.WriteString("| # | Question | Expected Tools | Actual Tools | Result |\n")
-	b.WriteString("|---|----------|---------------|--------------|--------|\n")
+	if hasCommand {
+		b.WriteString("| # | Question | Expected Tools | Actual Tools | Command | Result |\n")
+		b.WriteString("|---|----------|---------------|--------------|---------|--------|\n")
+	} else {
+		b.WriteString("| # | Question | Expected Tools | Actual Tools | Result |\n")
+		b.WriteString("|---|----------|---------------|--------------|--------|\n")
+	}
 
 	passed := 0
 	warned := 0
 	for i, r := range report.Results {
 		icon := "✅"
-		if !r.ToolMatch {
+		if !r.Passed {
 			icon = "❌"
 		} else if r.ExtraToolCalls {
 			icon = "⚠️"
@@ -320,13 +435,34 @@ func generateEvalMarkdown(report EvalReport) string {
 		} else {
 			passed++
 		}
-		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s |\n",
-			i+1,
-			r.Question,
-			formatToolList(r.ExpectedTools),
-			formatToolList(r.ActualTools),
-			icon,
-		)
+
+		cmdStatus := ""
+		if r.Command != "" {
+			if r.CommandPassed != nil && *r.CommandPassed {
+				cmdStatus = "✅"
+			} else if r.CommandPassed != nil {
+				cmdStatus = "❌"
+			}
+		}
+
+		if hasCommand {
+			fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s |\n",
+				i+1,
+				r.Question,
+				formatToolList(r.ExpectedTools),
+				formatToolList(r.ActualTools),
+				cmdStatus,
+				icon,
+			)
+		} else {
+			fmt.Fprintf(&b, "| %d | %s | %s | %s | %s |\n",
+				i+1,
+				r.Question,
+				formatToolList(r.ExpectedTools),
+				formatToolList(r.ActualTools),
+				icon,
+			)
+		}
 	}
 
 	fmt.Fprintf(&b, "\n**Result: %d/%d passed", passed, len(report.Results))
@@ -338,13 +474,16 @@ func generateEvalMarkdown(report EvalReport) string {
 	// Detail sections
 	for i, r := range report.Results {
 		icon := "✅"
-		if !r.ToolMatch {
+		if !r.Passed {
 			icon = "❌"
 		} else if r.ExtraToolCalls {
 			icon = "⚠️"
 		}
 		fmt.Fprintf(&b, "\n<details>\n<summary>Q%d: %s %s</summary>\n\n", i+1, r.Question, icon)
-		fmt.Fprintf(&b, "**Expected Tools:** %s\n", formatToolList(r.ExpectedTools))
+
+		if len(r.ExpectedTools) > 0 {
+			fmt.Fprintf(&b, "**Expected Tools:** %s\n", formatToolList(r.ExpectedTools))
+		}
 		fmt.Fprintf(&b, "**Actual Tools:** %s\n", formatToolList(r.ActualTools))
 
 		if r.ExtraToolCalls {
@@ -353,6 +492,23 @@ func generateEvalMarkdown(report EvalReport) string {
 
 		if r.Error != "" {
 			fmt.Fprintf(&b, "\n**Error:** %s\n", r.Error)
+		}
+
+		if r.Command != "" {
+			fmt.Fprintf(&b, "\n**Command:** `%s`\n", r.Command)
+			if r.CommandPassed != nil {
+				if *r.CommandPassed {
+					b.WriteString("**Command Result:** ✅ passed\n")
+				} else {
+					b.WriteString("**Command Result:** ❌ failed\n")
+				}
+			}
+			if r.CommandError != "" {
+				fmt.Fprintf(&b, "**Command Error:** %s\n", r.CommandError)
+			}
+			if r.CommandOutput != "" {
+				fmt.Fprintf(&b, "\n**Command Output:**\n```\n%s\n```\n", r.CommandOutput)
+			}
 		}
 
 		fmt.Fprintf(&b, "\n**Response:**\n\n%s\n", r.Response)

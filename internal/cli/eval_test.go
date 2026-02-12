@@ -1,8 +1,13 @@
 package cli
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"coragent/internal/agent"
 )
 
 func TestCheckToolMatch(t *testing.T) {
@@ -78,6 +83,7 @@ func TestGenerateEvalMarkdown(t *testing.T) {
 				ExpectedTools: []string{"sample_semantic_view"},
 				ActualTools:   []string{"sample_semantic_view"},
 				ToolMatch:     true,
+				Passed:        true,
 				Response:      "売上データによると...",
 				ThreadID:      "12345",
 			},
@@ -86,6 +92,7 @@ func TestGenerateEvalMarkdown(t *testing.T) {
 				ExpectedTools: []string{"snowflake_docs_service"},
 				ActualTools:   []string{"other_tool"},
 				ToolMatch:     false,
+				Passed:        false,
 				Response:      "検索結果...",
 				ThreadID:      "12346",
 			},
@@ -202,6 +209,7 @@ func TestGenerateEvalMarkdownWithExtraToolCalls(t *testing.T) {
 				ActualTools:    []string{"tool_a", "tool_b"},
 				ToolMatch:      true,
 				ExtraToolCalls: true,
+				Passed:         true,
 				Response:       "response...",
 				ThreadID:       "123",
 			},
@@ -239,5 +247,222 @@ func TestFormatToolList(t *testing.T) {
 				t.Errorf("formatToolList(%v) = %q, want %q", tt.tools, got, tt.want)
 			}
 		})
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+func TestComputeOverallPass(t *testing.T) {
+	tests := []struct {
+		name   string
+		result EvalResult
+		tc     agent.EvalTestCase
+		want   bool
+	}{
+		{
+			name: "tools only - match",
+			result: EvalResult{
+				ToolMatch: true,
+			},
+			tc:   agent.EvalTestCase{ExpectedTools: []string{"tool_a"}},
+			want: true,
+		},
+		{
+			name: "tools only - no match",
+			result: EvalResult{
+				ToolMatch: false,
+			},
+			tc:   agent.EvalTestCase{ExpectedTools: []string{"tool_a"}},
+			want: false,
+		},
+		{
+			name: "command only - pass",
+			result: EvalResult{
+				CommandPassed: boolPtr(true),
+			},
+			tc:   agent.EvalTestCase{Command: "echo ok"},
+			want: true,
+		},
+		{
+			name: "command only - fail",
+			result: EvalResult{
+				CommandPassed: boolPtr(false),
+			},
+			tc:   agent.EvalTestCase{Command: "echo ok"},
+			want: false,
+		},
+		{
+			name: "both - both pass",
+			result: EvalResult{
+				ToolMatch:     true,
+				CommandPassed: boolPtr(true),
+			},
+			tc:   agent.EvalTestCase{ExpectedTools: []string{"tool_a"}, Command: "echo ok"},
+			want: true,
+		},
+		{
+			name: "both - tools fail",
+			result: EvalResult{
+				ToolMatch:     false,
+				CommandPassed: boolPtr(true),
+			},
+			tc:   agent.EvalTestCase{ExpectedTools: []string{"tool_a"}, Command: "echo ok"},
+			want: false,
+		},
+		{
+			name: "both - command fail",
+			result: EvalResult{
+				ToolMatch:     true,
+				CommandPassed: boolPtr(false),
+			},
+			tc:   agent.EvalTestCase{ExpectedTools: []string{"tool_a"}, Command: "echo ok"},
+			want: false,
+		},
+		{
+			name: "error overrides everything",
+			result: EvalResult{
+				ToolMatch:     true,
+				CommandPassed: boolPtr(true),
+				Error:         "run agent: timeout",
+			},
+			tc:   agent.EvalTestCase{ExpectedTools: []string{"tool_a"}, Command: "echo ok"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := computeOverallPass(tt.result, tt.tc)
+			if got != tt.want {
+				t.Errorf("computeOverallPass() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunEvalCommand(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("exit 0", func(t *testing.T) {
+		input := CommandInput{Question: "test", Response: "resp", ActualTools: []string{"tool_a"}}
+		out, err := runEvalCommand(context.Background(), "echo ok", input, dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(out, "ok") {
+			t.Errorf("expected output to contain 'ok', got %q", out)
+		}
+	})
+
+	t.Run("exit non-zero", func(t *testing.T) {
+		input := CommandInput{Question: "test"}
+		_, err := runEvalCommand(context.Background(), "exit 1", input, dir)
+		if err == nil {
+			t.Fatal("expected error for exit 1, got nil")
+		}
+	})
+
+	t.Run("reads stdin JSON", func(t *testing.T) {
+		// Script that reads stdin and echoes question field
+		script := filepath.Join(dir, "read_stdin.sh")
+		os.WriteFile(script, []byte("#!/bin/sh\ncat\n"), 0o755)
+
+		input := CommandInput{
+			Question:    "hello",
+			Response:    "world",
+			ActualTools: []string{"tool_a"},
+			ThreadID:    "t123",
+		}
+		out, err := runEvalCommand(context.Background(), "sh "+script, input, dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(out, `"question":"hello"`) {
+			t.Errorf("expected JSON with question field, got %q", out)
+		}
+	})
+
+	t.Run("captures stderr", func(t *testing.T) {
+		input := CommandInput{Question: "test"}
+		out, err := runEvalCommand(context.Background(), "echo err >&2", input, dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(out, "err") {
+			t.Errorf("expected stderr output, got %q", out)
+		}
+	})
+
+	t.Run("respects context cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately
+		input := CommandInput{Question: "test"}
+		_, err := runEvalCommand(ctx, "sleep 10", input, dir)
+		if err == nil {
+			t.Fatal("expected error for cancelled context, got nil")
+		}
+	})
+}
+
+func TestGenerateEvalMarkdownWithCommand(t *testing.T) {
+	report := EvalReport{
+		AgentName:   "TEST-AGENT",
+		Database:    "TEST_DB",
+		Schema:      "PUBLIC",
+		EvaluatedAt: "2025-01-15T10:30:00Z",
+		Results: []EvalResult{
+			{
+				Question:      "test with both",
+				ExpectedTools: []string{"tool_a"},
+				ActualTools:   []string{"tool_a"},
+				ToolMatch:     true,
+				Command:       "python check.py",
+				CommandPassed: boolPtr(true),
+				CommandOutput: "score: 0.95",
+				Passed:        true,
+				Response:      "response...",
+				ThreadID:      "123",
+			},
+			{
+				Question:      "command only fail",
+				ActualTools:   []string{},
+				Command:       "python eval.py",
+				CommandPassed: boolPtr(false),
+				CommandError:  "score below threshold",
+				CommandOutput: "score: 0.2",
+				Passed:        false,
+				Response:      "bad response...",
+				ThreadID:      "124",
+			},
+		},
+	}
+
+	md := generateEvalMarkdown(report)
+
+	// Check Command column header exists
+	if !strings.Contains(md, "| Command |") {
+		t.Error("missing Command column header")
+	}
+
+	// Check command details in detail section
+	if !strings.Contains(md, "**Command:** `python check.py`") {
+		t.Error("missing command name in details")
+	}
+	if !strings.Contains(md, "**Command Result:** ✅ passed") {
+		t.Error("missing command pass result")
+	}
+	if !strings.Contains(md, "**Command Result:** ❌ failed") {
+		t.Error("missing command fail result")
+	}
+	if !strings.Contains(md, "score: 0.95") {
+		t.Error("missing command output")
+	}
+	if !strings.Contains(md, "score below threshold") {
+		t.Error("missing command error")
+	}
+
+	// Summary should show 1/2 passed
+	if !strings.Contains(md, "**Result: 1/2 passed**") {
+		t.Errorf("missing or incorrect result summary, got:\n%s", md)
 	}
 }
