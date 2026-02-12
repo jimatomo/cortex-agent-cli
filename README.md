@@ -7,11 +7,13 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 ## Features
 
 - Deploy Cortex Agents from YAML files
-- Plan/Apply workflow with diff detection (PUT update only when changed)
+- Plan/Apply/Delete workflow with diff detection (PUT update only when changed)
+- Grant management with diff-based GRANT/REVOKE on agents
 - Validate YAML schema (unknown fields rejected)
 - Export existing agents to YAML
 - Run agents with streaming response and multi-turn conversation support
 - Evaluate agent accuracy with test cases defined in YAML
+- Recursive directory scanning for multi-agent projects
 - Key Pair (RSA JWT) authentication
 - OAuth authentication (experimental)
 
@@ -289,6 +291,7 @@ coragent logout --all
 |---------|-------------|
 | `coragent plan [path]` | Show execution plan without applying (default: `.`) |
 | `coragent apply [path]` | Apply changes to agents (default: `.`) |
+| `coragent delete [path]` | Delete agents defined in YAML files (default: `.`) |
 | `coragent validate [path]` | Validate YAML files only (default: `.`) |
 | `coragent export <agent-name>` | Export existing agent to YAML |
 | `coragent run [agent-name]` | Run an agent with streaming response (interactive selection if omitted) |
@@ -312,6 +315,51 @@ coragent logout --all
 - **CREATE**: Agent does not exist → `POST`
 - **UPDATE**: Agent exists with changes → `PUT` with changed top-level fields
 - **NO_CHANGE**: Agent exists, no diff → Skip API call
+
+### Plan Flags
+
+| Flag | Description |
+|------|-------------|
+| `-R, --recursive` | Recursively load agents from subdirectories |
+
+### Apply Flags
+
+| Flag | Description |
+|------|-------------|
+| `-y, --yes` | Skip confirmation prompt |
+| `-R, --recursive` | Recursively load agents from subdirectories |
+| `--eval` | Run eval tests for changed agents after apply |
+
+## Delete
+
+Delete agents defined in YAML files. Shows a plan and asks for confirmation before deleting.
+
+```bash
+# Delete agents in current directory
+coragent delete
+
+# Delete agents from a specific file
+coragent delete agent.yaml
+
+# Delete agents from a directory recursively
+coragent delete ./agents -R
+
+# Skip confirmation prompt
+coragent delete -y
+```
+
+### Delete Flags
+
+| Flag | Description |
+|------|-------------|
+| `-y, --yes` | Skip confirmation prompt |
+| `-R, --recursive` | Recursively load agents from subdirectories |
+
+### Validate Flags
+
+| Flag | Description |
+|------|-------------|
+| `-R, --recursive` | Recursively load agents from subdirectories |
 
 ## Export
 
@@ -527,6 +575,164 @@ Threads:
 |------|-------------|
 | `--list` | List all threads and exit (no API credentials required) |
 | `--delete <id>` | Delete a specific thread by ID |
+
+## YAML Spec Reference
+
+A complete example showing all supported fields:
+
+```yaml
+deploy:
+  database: MY_DATABASE
+  schema: MY_SCHEMA
+  grant:
+    account_roles:
+      - role: ANALYST
+        privileges:
+          - ALL            # Expands to USAGE, MODIFY, MONITOR
+    database_roles:
+      - role: MY_DATABASE.CORTEX_MONITOR
+        privileges:
+          - MONITOR
+
+eval:
+  tests:
+    - question: "Show me the sales data"
+      expected_tools:
+        - sample_semantic_view
+    - question: "Search the Snowflake docs"
+      expected_tools:
+        - snowflake_docs_service
+
+name: my-support-agent
+comment: Customer support agent
+profile:
+  display_name: Support Bot
+models:
+  orchestration: claude-4-sonnet
+instructions:
+  response: |
+    You are a helpful customer support agent.
+  orchestration: |
+    Think step by step before answering.
+  system: |
+    You are a helpful assistant.
+  sample_questions:
+    - question: "How do I analyze sales data?"
+    - question: "What is a pivot table?"
+orchestration:
+  budget:
+    seconds: 60
+    tokens: 16000
+tools:
+  - tool_spec:
+      type: cortex_analyst_text_to_sql
+      name: sample_semantic_view
+      description: A semantic view for sales data
+  - tool_spec:
+      type: cortex_search
+      name: snowflake_docs_service
+      description: Snowflake documentation search
+tool_resources:
+  sample_semantic_view:
+    semantic_view: MY_DATABASE.MY_SCHEMA.SAMPLE_SM
+    execution_environment:
+      type: warehouse
+      warehouse: COMPUTE_WH
+      query_timeout: 60
+  snowflake_docs_service:
+    search_service: MY_DATABASE.MY_SCHEMA.DOCS_SERVICE
+    max_results: 4
+    id_column: SOURCE_URL
+    title_column: DOCUMENT_TITLE
+```
+
+### Top-level Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Agent name |
+| `comment` | No | Agent description |
+| `deploy` | No | Deployment settings (database, schema, grants) |
+| `eval` | No | Evaluation test cases (not sent to Snowflake API) |
+| `profile` | No | Agent profile (`display_name`) |
+| `models` | No | Model configuration (`orchestration`: model name) |
+| `instructions` | No | Agent instructions |
+| `orchestration` | No | Orchestration settings (`budget`) |
+| `tools` | No | Tool definitions |
+| `tool_resources` | No | Per-tool resource configuration |
+
+### Instructions Fields
+
+| Field | Description |
+|-------|-------------|
+| `response` | Instructions for how the agent should respond |
+| `orchestration` | Instructions for the orchestration layer |
+| `system` | System-level instructions |
+| `sample_questions` | List of sample questions (each with a `question` field) |
+
+### Tool Resources
+
+`tool_resources` is a map keyed by tool name (matching `tool_spec.name`). Supported sub-fields depend on the tool type:
+
+**`cortex_analyst_text_to_sql`:**
+
+| Field | Description |
+|-------|-------------|
+| `semantic_view` | Fully qualified semantic view name (e.g., `DB.SCHEMA.VIEW`) |
+| `execution_environment.type` | Environment type (e.g., `warehouse`) |
+| `execution_environment.warehouse` | Warehouse name |
+| `execution_environment.query_timeout` | Query timeout in seconds |
+
+**`cortex_search`:**
+
+| Field | Description |
+|-------|-------------|
+| `search_service` | Fully qualified search service name (e.g., `DB.SCHEMA.SERVICE`) |
+| `max_results` | Maximum number of results to return |
+| `id_column` | ID column name |
+| `title_column` | Title column name |
+
+## Grant Management
+
+Grants can be managed declaratively via the `deploy.grant` section. The CLI computes the diff between the desired state (YAML) and the current state (Snowflake) and executes only the necessary `GRANT`/`REVOKE` statements.
+
+### YAML Definition
+
+```yaml
+deploy:
+  database: MY_DATABASE
+  schema: MY_SCHEMA
+  grant:
+    account_roles:
+      - role: ANALYST
+        privileges:
+          - ALL
+      - role: DATA_VIEWER
+        privileges:
+          - USAGE
+    database_roles:
+      - role: MY_DATABASE.CORTEX_MONITOR
+        privileges:
+          - MONITOR
+```
+
+### Privileges
+
+| Privilege | Description |
+|-----------|-------------|
+| `USAGE` | Allows using the agent |
+| `MODIFY` | Allows modifying the agent |
+| `MONITOR` | Allows monitoring the agent |
+| `ALL` | Expands to `USAGE`, `MODIFY`, and `MONITOR` |
+
+- `OWNERSHIP` is managed automatically by Snowflake and is ignored.
+- Database roles must be fully qualified (e.g., `MY_DATABASE.ROLE_NAME`).
+
+### Behavior
+
+- On `plan`: Grant changes are shown as `+` (grant) and `-` (revoke) under the `grants:` section.
+- On `apply`: `REVOKE` statements are executed first, then `GRANT` statements.
+- If no `deploy.grant` section is defined, existing grants on the agent are not modified.
 
 ## CI/CD
 
