@@ -42,7 +42,7 @@ The script automatically:
 - Detects your OS (macOS/Linux) and architecture (amd64/arm64)
 - Downloads the latest release from GitHub
 - Verifies checksum for security
-- Installs to `/usr/local/bin` by default
+- Installs to `~/.local/bin` by default
 
 ### Manual Download
 

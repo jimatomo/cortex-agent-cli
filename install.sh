@@ -3,7 +3,7 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- --version v0.1.0
-#   curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- --install-dir /usr/local/bin
+#   curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- --install-dir ~/bin
 #
 # This script is compatible with bash, zsh, and sh.
 
@@ -16,7 +16,7 @@ GITHUB_API="https://api.github.com"
 GITHUB_RELEASES="https://github.com/${REPO}/releases"
 
 # Default values
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="$HOME/.local/bin"
 VERSION=""
 VERBOSE=0
 FORCE=0
@@ -87,7 +87,7 @@ Examples:
     curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sh -s -- -v v0.1.0
 
     # Install to custom directory
-    curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sh -s -- -d /usr/local/bin
+    curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sh -s -- -d ~/bin
 EOF
     exit 0
 }
