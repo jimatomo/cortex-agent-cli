@@ -10,6 +10,50 @@ import (
 	"coragent/internal/agent"
 )
 
+func TestEvalOutputPaths(t *testing.T) {
+	t.Run("without timestamp", func(t *testing.T) {
+		jsonPath, mdPath := evalOutputPaths("./out", "my-agent", false)
+		if jsonPath != "out/my-agent_eval.json" {
+			t.Errorf("jsonPath = %q, want %q", jsonPath, "out/my-agent_eval.json")
+		}
+		if mdPath != "out/my-agent_eval.md" {
+			t.Errorf("mdPath = %q, want %q", mdPath, "out/my-agent_eval.md")
+		}
+	})
+
+	t.Run("with timestamp", func(t *testing.T) {
+		jsonPath, mdPath := evalOutputPaths("./out", "my-agent", true)
+		// Should match pattern: my-agent_eval_YYYYMMDD_HHMMSS.json
+		if !strings.Contains(jsonPath, "my-agent_eval_") {
+			t.Errorf("jsonPath missing timestamp suffix: %q", jsonPath)
+		}
+		if !strings.HasSuffix(jsonPath, ".json") {
+			t.Errorf("jsonPath should end with .json: %q", jsonPath)
+		}
+		if !strings.Contains(mdPath, "my-agent_eval_") {
+			t.Errorf("mdPath missing timestamp suffix: %q", mdPath)
+		}
+		if !strings.HasSuffix(mdPath, ".md") {
+			t.Errorf("mdPath should end with .md: %q", mdPath)
+		}
+		// Verify timestamp format (8 digits _ 6 digits)
+		// Extract suffix between "my-agent_eval_" and ".json"
+		base := filepath.Base(jsonPath)
+		ts := strings.TrimPrefix(base, "my-agent_eval_")
+		ts = strings.TrimSuffix(ts, ".json")
+		if len(ts) != 15 { // YYYYMMDD_HHMMSS = 15 chars
+			t.Errorf("timestamp suffix %q has unexpected length %d", ts, len(ts))
+		}
+	})
+
+	t.Run("dot output dir", func(t *testing.T) {
+		jsonPath, _ := evalOutputPaths(".", "agent", false)
+		if jsonPath != "agent_eval.json" {
+			t.Errorf("jsonPath = %q, want %q", jsonPath, "agent_eval.json")
+		}
+	})
+}
+
 func TestCheckToolMatch(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -14,7 +14,8 @@ type CoragentConfig struct {
 
 // EvalSettings holds eval-specific configuration.
 type EvalSettings struct {
-	OutputDir string `toml:"output_dir"`
+	OutputDir       string `toml:"output_dir"`
+	TimestampSuffix bool   `toml:"timestamp_suffix"`
 }
 
 // LoadCoragentConfig loads configuration from .coragent.toml.

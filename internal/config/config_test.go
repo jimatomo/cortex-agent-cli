@@ -82,6 +82,44 @@ output_dir = "global-dir"
 	}
 }
 
+func TestLoadCoragentConfig_TimestampSuffix(t *testing.T) {
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origDir) })
+	os.Chdir(dir)
+
+	content := `[eval]
+output_dir = "./results"
+timestamp_suffix = true
+`
+	os.WriteFile(filepath.Join(dir, ".coragent.toml"), []byte(content), 0o644)
+
+	cfg := LoadCoragentConfig()
+	if cfg.Eval.OutputDir != "./results" {
+		t.Errorf("expected ./results, got %q", cfg.Eval.OutputDir)
+	}
+	if !cfg.Eval.TimestampSuffix {
+		t.Error("expected TimestampSuffix to be true")
+	}
+}
+
+func TestLoadCoragentConfig_TimestampSuffixDefault(t *testing.T) {
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origDir) })
+	os.Chdir(dir)
+
+	content := `[eval]
+output_dir = "./results"
+`
+	os.WriteFile(filepath.Join(dir, ".coragent.toml"), []byte(content), 0o644)
+
+	cfg := LoadCoragentConfig()
+	if cfg.Eval.TimestampSuffix {
+		t.Error("expected TimestampSuffix to be false by default")
+	}
+}
+
 func TestLoadCoragentConfig_NoFile(t *testing.T) {
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()

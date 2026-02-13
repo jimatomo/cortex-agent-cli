@@ -226,7 +226,7 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 			var evalErrors []string
 			for _, item := range evalItems {
 				specDir := filepath.Dir(item.Parsed.Path)
-				if err := runEvalForAgent(client, item.Target, item.Parsed.Spec, outputDir, specDir); err != nil {
+				if err := runEvalForAgent(client, item.Target, item.Parsed.Spec, outputDir, specDir, appCfg.Eval.TimestampSuffix); err != nil {
 					evalErrors = append(evalErrors, fmt.Sprintf("%s: %v", item.Parsed.Spec.Name, err))
 				}
 			}

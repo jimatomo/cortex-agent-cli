@@ -113,9 +113,9 @@ Agents without an eval section are skipped.`,
 				return err
 			}
 
-			// Apply config file output dir if flag not explicitly set
+			// Apply config file settings if output-dir flag not explicitly set
+			appCfg := config.LoadCoragentConfig()
 			if !cmd.Flags().Changed("output-dir") {
-				appCfg := config.LoadCoragentConfig()
 				if appCfg.Eval.OutputDir != "" {
 					outputDir = appCfg.Eval.OutputDir
 				}
@@ -134,7 +134,7 @@ Agents without an eval section are skipped.`,
 				}
 
 				specDir := filepath.Dir(item.Path)
-				if err := runEvalForAgent(client, target, item.Spec, outputDir, specDir); err != nil {
+				if err := runEvalForAgent(client, target, item.Spec, outputDir, specDir, appCfg.Eval.TimestampSuffix); err != nil {
 					return fmt.Errorf("%s: %w", item.Path, err)
 				}
 			}
@@ -149,7 +149,19 @@ Agents without an eval section are skipped.`,
 	return cmd
 }
 
-func runEvalForAgent(client *api.Client, target Target, spec agent.AgentSpec, outputDir, specDir string) error {
+// evalOutputPaths returns the JSON and Markdown output file paths for an eval report.
+// When timestampSuffix is true, a UTC timestamp is appended to the base name.
+func evalOutputPaths(outputDir, agentName string, timestampSuffix bool) (jsonPath, mdPath string) {
+	suffix := ""
+	if timestampSuffix {
+		suffix = "_" + time.Now().UTC().Format("20060102_150405")
+	}
+	jsonPath = filepath.Join(outputDir, agentName+"_eval"+suffix+".json")
+	mdPath = filepath.Join(outputDir, agentName+"_eval"+suffix+".md")
+	return
+}
+
+func runEvalForAgent(client *api.Client, target Target, spec agent.AgentSpec, outputDir, specDir string, timestampSuffix bool) error {
 	report := EvalReport{
 		AgentName:   spec.Name,
 		Database:    target.Database,
@@ -157,8 +169,7 @@ func runEvalForAgent(client *api.Client, target Target, spec agent.AgentSpec, ou
 		EvaluatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 
-	jsonPath := filepath.Join(outputDir, spec.Name+"_eval.json")
-	mdPath := filepath.Join(outputDir, spec.Name+"_eval.md")
+	jsonPath, mdPath := evalOutputPaths(outputDir, spec.Name, timestampSuffix)
 
 	tests := spec.Eval.Tests
 	fmt.Fprintf(os.Stderr, "Evaluating %s (%d tests)...\n", spec.Name, len(tests))

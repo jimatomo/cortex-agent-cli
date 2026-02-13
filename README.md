@@ -456,6 +456,7 @@ If no file is found, default values are used.
 ```toml
 [eval]
 output_dir = "./eval-results"
+timestamp_suffix = true
 ```
 
 ### Supported fields
@@ -463,6 +464,7 @@ output_dir = "./eval-results"
 | Section | Field | Description |
 |---------|-------|-------------|
 | `[eval]` | `output_dir` | Default output directory for eval reports |
+| `[eval]` | `timestamp_suffix` | Append UTC timestamp to output filenames (default: `false`) |
 
 ### Priority
 
@@ -547,6 +549,11 @@ Two report files are generated per agent:
 
 - **`{agent_name}_eval.json`** - Machine-readable results with full response text
 - **`{agent_name}_eval.md`** - Markdown report with summary table and collapsible details
+
+When `timestamp_suffix = true` is set in `.coragent.toml`, filenames include a UTC timestamp to preserve past results:
+
+- **`{agent_name}_eval_20260212_103000.json`**
+- **`{agent_name}_eval_20260212_103000.md`**
 
 The output directory is resolved in the following order:
 
