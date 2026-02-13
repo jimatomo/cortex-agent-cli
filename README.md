@@ -91,16 +91,34 @@ To use a specific named connection:
 coragent plan --connection myconn
 ```
 
-**Option B: OAuth (Recommended for interactive use)**
+**Option B: OAuth via config.toml (Recommended for interactive use)**
+
+```toml
+# ~/.snowflake/config.toml
+default_connection_name = "myconn"
+
+[connections.myconn]
+account = "your_account"
+role = "CORTEX_USER"
+database = "MY_DATABASE"
+schema = "MY_SCHEMA"
+authenticator = "OAUTH_AUTHORIZATION_CODE"
+```
 
 ```bash
-export SNOWFLAKE_ACCOUNT=your_account
-
 # Login via browser (opens authentication page)
 coragent login
 
-# Enable OAuth for subsequent commands
+# OAuth is automatically used based on authenticator setting
+coragent plan
+```
+
+Or using environment variables:
+
+```bash
+export SNOWFLAKE_ACCOUNT=your_account
 export SNOWFLAKE_AUTHENTICATOR=OAUTH
+coragent login
 ```
 
 **Option C: Key Pair via environment variables (Recommended for CI/CD)**
@@ -206,7 +224,9 @@ Use the `--connection` / `-c` flag to select a named connection. If omitted, the
 | `private_key_file` | Path to private key file (supports `~` expansion) |
 | `private_key_path` | Alias for `private_key_file` |
 | `private_key_raw` | Private key content inline |
-| `oauth_redirect_uri` | OAuth redirect URI |
+| `oauth_redirect_uri` | OAuth redirect URI (default: `http://127.0.0.1:8080`) |
+| `oauth_client_id` | OAuth client ID (default: `LOCAL_APPLICATION`) |
+| `oauth_client_secret` | OAuth client secret (default: `LOCAL_APPLICATION`) |
 
 ## OAuth Authentication (Experimental)
 
@@ -220,30 +240,125 @@ For more details, see [Snowflake OAuth for Local Applications](https://docs.snow
 
 The CLI uses the built-in `SNOWFLAKE$LOCAL_APPLICATION` security integration. In most cases, no setup is required.
 
+### Configuration
+
+OAuth can be configured via `~/.snowflake/config.toml`, environment variables, or CLI flags. All methods can be combined — CLI flags take the highest priority.
+
+**Option A: config.toml (Recommended)**
+
+```toml
+default_connection_name = "myconn"
+
+[connections.myconn]
+account = "your_account"
+role = "CORTEX_USER"
+database = "MY_DATABASE"
+schema = "MY_SCHEMA"
+authenticator = "OAUTH_AUTHORIZATION_CODE"
+```
+
+With this configuration, `coragent login` automatically picks up the account from config.toml:
+
+```bash
+# Login (account is read from config.toml)
+coragent login
+
+# Run commands — OAuth is selected automatically via authenticator setting
+coragent run my-agent -m "Hello"
+```
+
+You can also customize the redirect URI if the default port (`8080`) conflicts with another service:
+
+```toml
+[connections.myconn]
+account = "your_account"
+authenticator = "OAUTH_AUTHORIZATION_CODE"
+oauth_redirect_uri = "http://127.0.0.1:9090"
+```
+
+**Option B: Environment variables**
+
+```bash
+export SNOWFLAKE_ACCOUNT=your_account
+export SNOWFLAKE_AUTHENTICATOR=OAUTH
+
+# Optional: custom redirect URI (default: http://127.0.0.1:8080)
+# export SNOWFLAKE_OAUTH_REDIRECT_URI=http://127.0.0.1:9090
+
+coragent login
+coragent run my-agent -m "Hello"
+```
+
+**Option C: CLI flags only**
+
+```bash
+coragent login --account your_account
+coragent run my-agent --account your_account -m "Hello"
+```
+
+> **Note**: When using CLI flags or environment variables without setting `authenticator`, you need to explicitly set `SNOWFLAKE_AUTHENTICATOR=OAUTH` (or `authenticator = "OAUTH_AUTHORIZATION_CODE"` in config.toml) so that the CLI uses OAuth instead of the default Key Pair authentication.
+
+#### OAuth config.toml fields
+
+| Field | Description |
+|-------|-------------|
+| `authenticator` | Set to `OAUTH_AUTHORIZATION_CODE` to enable OAuth |
+| `oauth_redirect_uri` | Redirect URI for the local callback server (default: `http://127.0.0.1:8080`) |
+
 ### Login
 
 Authenticate via browser:
 
 ```bash
-# Opens browser for authentication
+# Opens browser for authentication (account from config.toml or env)
+coragent login
+
+# Specify account explicitly
 coragent login --account your_account
 
+# Use a specific named connection from config.toml
+coragent login --connection myconn
+
 # Manual mode (displays URL instead of opening browser)
-coragent login --account your_account --no-browser
+coragent login --no-browser
+
+# Custom timeout (default: 5 minutes)
+coragent login --timeout 10m
 ```
 
-After successful authentication, tokens are stored in `~/.coragent/oauth.json`.
+After successful authentication, tokens are stored in `~/.coragent/oauth.json`. Tokens are automatically refreshed on subsequent API calls when a refresh token is available.
+
+#### Login Flags
+
+| Flag | Description |
+|------|-------------|
+| `-a, --account` | Snowflake account identifier (overrides config.toml / env) |
+| `--redirect-uri` | OAuth redirect URI (default: `http://127.0.0.1:8080`) |
+| `--no-browser` | Print the authorization URL instead of opening a browser |
+| `--timeout` | Timeout waiting for authentication (default: `5m`) |
 
 ### Using OAuth
 
-Once logged in, enable OAuth authentication:
+Once logged in, run commands as usual. If `authenticator` is set in config.toml, no extra flags are needed:
+
+```bash
+# config.toml has authenticator = "OAUTH_AUTHORIZATION_CODE"
+coragent plan
+coragent run my-agent -m "Hello"
+```
+
+If you're using environment variables instead:
 
 ```bash
 export SNOWFLAKE_AUTHENTICATOR=OAUTH
-
-# Now run commands as usual
 coragent run my-agent -m "Hello"
 ```
+
+### Token Lifecycle
+
+- **Access tokens** expire after approximately 10 minutes (set by Snowflake).
+- **Refresh tokens** are used automatically to renew expired access tokens without re-authentication.
+- If the refresh token itself expires or is revoked, run `coragent login` again.
 
 ### Check Status
 
@@ -262,7 +377,7 @@ Account: MYACCOUNT
 Method:  OAUTH
 
 Status:  Authenticated
-Expires: 2024-01-15T14:30:00Z (45 minutes remaining)
+Expires: 2026-02-13T14:30:00Z (45 minutes remaining)
 Refresh: Available (automatic renewal)
 ```
 
