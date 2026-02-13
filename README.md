@@ -25,24 +25,18 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh
 ```
 
-Options:
+The script detects OS/architecture, verifies checksum, and installs to `~/.local/bin` by default.
 
 ```bash
 # Install specific version
 curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- -v v0.1.0
 
-# Install to custom directory (e.g., ~/local/bin)
-curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- -d ~/.local/bin
+# Install to custom directory
+curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- -d ~/bin
 
-# Force reinstall (even if same version exists)
+# Force reinstall
 curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh -s -- --force
 ```
-
-The script automatically:
-- Detects your OS (macOS/Linux) and architecture (amd64/arm64)
-- Downloads the latest release from GitHub
-- Verifies checksum for security
-- Installs to `~/.local/bin` by default
 
 ### Manual Download
 
@@ -62,9 +56,9 @@ go build -o coragent ./cmd/coragent
 
 Choose one of the following authentication methods:
 
-**Option A: Snowflake CLI config.toml (Recommended)**
+**Option A: Key Pair via config.toml (Recommended)**
 
-Use `~/.snowflake/config.toml` — the same configuration file used by Snowflake CLI and the Snowflake Python connector.
+Use `~/.snowflake/config.toml` — the same file used by Snowflake CLI and the Python connector. See [config.toml details](#snowflake-cli-configtoml) for search paths and all supported fields.
 
 ```toml
 default_connection_name = "myconn"
@@ -79,16 +73,9 @@ authenticator = "SNOWFLAKE_JWT"
 private_key_file = "~/.snowflake/rsa_key.p8"
 ```
 
-Then simply run:
-
 ```bash
-coragent plan
-```
-
-To use a specific named connection:
-
-```bash
-coragent plan --connection myconn
+coragent plan                    # uses default connection
+coragent plan --connection myconn  # uses named connection
 ```
 
 **Option B: OAuth via config.toml (Recommended for interactive use)**
@@ -106,20 +93,11 @@ authenticator = "OAUTH_AUTHORIZATION_CODE"
 ```
 
 ```bash
-# Login via browser (opens authentication page)
-coragent login
-
-# OAuth is automatically used based on authenticator setting
-coragent plan
+coragent login   # opens browser for authentication
+coragent plan    # OAuth is selected automatically via authenticator setting
 ```
 
-Or using environment variables:
-
-```bash
-export SNOWFLAKE_ACCOUNT=your_account
-export SNOWFLAKE_AUTHENTICATOR=OAUTH
-coragent login
-```
+See [OAuth Authentication](#oauth-authentication-experimental) for details on environment variables, token lifecycle, and advanced options.
 
 **Option C: Key Pair via environment variables (Recommended for CI/CD)**
 
@@ -187,28 +165,13 @@ Settings are resolved in the following order (highest priority first):
 
 ### Snowflake CLI config.toml
 
-The CLI reads `~/.snowflake/config.toml` — the same configuration file used by Snowflake CLI (`snow`) and the Snowflake Python connector. The file is searched in the following order:
+The CLI reads `~/.snowflake/config.toml` — the same file used by Snowflake CLI (`snow`) and the Python connector. The file is searched in the following order:
 
 1. `$SNOWFLAKE_HOME/config.toml`
 2. `~/.snowflake/config.toml`
 3. `~/.config/snowflake/config.toml` (Linux only)
 
-Example config:
-
-```toml
-default_connection_name = "myconn"
-
-[connections.myconn]
-account = "your_account"
-user = "your_user"
-role = "CORTEX_USER"
-database = "MY_DATABASE"
-schema = "MY_SCHEMA"
-authenticator = "SNOWFLAKE_JWT"
-private_key_file = "~/.snowflake/rsa_key.p8"
-```
-
-Use the `--connection` / `-c` flag to select a named connection. If omitted, the value of `default_connection_name` in config.toml (or the `SNOWFLAKE_DEFAULT_CONNECTION_NAME` environment variable) is used.
+Use `--connection` / `-c` to select a named connection. If omitted, `default_connection_name` (or the `SNOWFLAKE_DEFAULT_CONNECTION_NAME` env var) is used.
 
 #### Supported config.toml fields
 
@@ -232,42 +195,20 @@ Use the `--connection` / `-c` flag to select a named connection. If omitted, the
 
 > **Warning**: OAuth authentication is an experimental feature. The API and behavior may change in future versions.
 
-As an alternative to Key Pair authentication, you can use Snowflake OAuth (Authorization Code Flow) to authenticate via browser. This uses Snowflake's built-in `SNOWFLAKE$LOCAL_APPLICATION` security integration.
-
-For more details, see [Snowflake OAuth for Local Applications](https://docs.snowflake.com/en/user-guide/oauth-local-applications).
-
-### Snowflake Setup (Optional)
-
-The CLI uses the built-in `SNOWFLAKE$LOCAL_APPLICATION` security integration. In most cases, no setup is required.
+Snowflake OAuth (Authorization Code Flow) authenticates via browser using the built-in `SNOWFLAKE$LOCAL_APPLICATION` security integration. No Snowflake-side setup is required in most cases. For details, see [Snowflake OAuth for Local Applications](https://docs.snowflake.com/en/user-guide/oauth-local-applications).
 
 ### Configuration
 
-OAuth can be configured via `~/.snowflake/config.toml`, environment variables, or CLI flags. All methods can be combined — CLI flags take the highest priority.
-
-**Option A: config.toml (Recommended)**
-
-```toml
-default_connection_name = "myconn"
-
-[connections.myconn]
-account = "your_account"
-role = "CORTEX_USER"
-database = "MY_DATABASE"
-schema = "MY_SCHEMA"
-authenticator = "OAUTH_AUTHORIZATION_CODE"
-```
-
-With this configuration, `coragent login` automatically picks up the account from config.toml:
+Set `authenticator` to `OAUTH_AUTHORIZATION_CODE` in config.toml (see [Quick Start](#1-configure-credentials) for a full example), or use environment variables:
 
 ```bash
-# Login (account is read from config.toml)
-coragent login
-
-# Run commands — OAuth is selected automatically via authenticator setting
-coragent run my-agent -m "Hello"
+export SNOWFLAKE_ACCOUNT=your_account
+export SNOWFLAKE_AUTHENTICATOR=OAUTH
+# Optional: custom redirect URI (default: http://127.0.0.1:8080)
+# export SNOWFLAKE_OAUTH_REDIRECT_URI=http://127.0.0.1:9090
 ```
 
-You can also customize the redirect URI if the default port (`8080`) conflicts with another service:
+To customize the redirect URI in config.toml:
 
 ```toml
 [connections.myconn]
@@ -276,59 +217,17 @@ authenticator = "OAUTH_AUTHORIZATION_CODE"
 oauth_redirect_uri = "http://127.0.0.1:9090"
 ```
 
-**Option B: Environment variables**
-
-```bash
-export SNOWFLAKE_ACCOUNT=your_account
-export SNOWFLAKE_AUTHENTICATOR=OAUTH
-
-# Optional: custom redirect URI (default: http://127.0.0.1:8080)
-# export SNOWFLAKE_OAUTH_REDIRECT_URI=http://127.0.0.1:9090
-
-coragent login
-coragent run my-agent -m "Hello"
-```
-
-**Option C: CLI flags only**
-
-```bash
-coragent login --account your_account
-coragent run my-agent --account your_account -m "Hello"
-```
-
-> **Note**: When using CLI flags or environment variables without setting `authenticator`, you need to explicitly set `SNOWFLAKE_AUTHENTICATOR=OAUTH` (or `authenticator = "OAUTH_AUTHORIZATION_CODE"` in config.toml) so that the CLI uses OAuth instead of the default Key Pair authentication.
-
-#### OAuth config.toml fields
-
-| Field | Description |
-|-------|-------------|
-| `authenticator` | Set to `OAUTH_AUTHORIZATION_CODE` to enable OAuth |
-| `oauth_redirect_uri` | Redirect URI for the local callback server (default: `http://127.0.0.1:8080`) |
-
 ### Login
 
-Authenticate via browser:
-
 ```bash
-# Opens browser for authentication (account from config.toml or env)
-coragent login
-
-# Specify account explicitly
-coragent login --account your_account
-
-# Use a specific named connection from config.toml
-coragent login --connection myconn
-
-# Manual mode (displays URL instead of opening browser)
-coragent login --no-browser
-
-# Custom timeout (default: 5 minutes)
-coragent login --timeout 10m
+coragent login                       # account from config.toml or env
+coragent login --account your_account  # explicit account
+coragent login --connection myconn     # named connection
+coragent login --no-browser            # print URL instead of opening browser
+coragent login --timeout 10m           # custom timeout (default: 5m)
 ```
 
-After successful authentication, tokens are stored in `~/.coragent/oauth.json`. Tokens are automatically refreshed on subsequent API calls when a refresh token is available.
-
-#### Login Flags
+Tokens are stored in `~/.coragent/oauth.json` and automatically refreshed when a refresh token is available.
 
 | Flag | Description |
 |------|-------------|
@@ -337,60 +236,18 @@ After successful authentication, tokens are stored in `~/.coragent/oauth.json`. 
 | `--no-browser` | Print the authorization URL instead of opening a browser |
 | `--timeout` | Timeout waiting for authentication (default: `5m`) |
 
-### Using OAuth
-
-Once logged in, run commands as usual. If `authenticator` is set in config.toml, no extra flags are needed:
-
-```bash
-# config.toml has authenticator = "OAUTH_AUTHORIZATION_CODE"
-coragent plan
-coragent run my-agent -m "Hello"
-```
-
-If you're using environment variables instead:
-
-```bash
-export SNOWFLAKE_AUTHENTICATOR=OAUTH
-coragent run my-agent -m "Hello"
-```
-
 ### Token Lifecycle
 
 - **Access tokens** expire after approximately 10 minutes (set by Snowflake).
 - **Refresh tokens** are used automatically to renew expired access tokens without re-authentication.
 - If the refresh token itself expires or is revoked, run `coragent login` again.
 
-### Check Status
-
-View current authentication status:
+### Status and Logout
 
 ```bash
-coragent auth status
-```
-
-Example output:
-```
-Authentication Status
-=====================
-
-Account: MYACCOUNT
-Method:  OAUTH
-
-Status:  Authenticated
-Expires: 2026-02-13T14:30:00Z (45 minutes remaining)
-Refresh: Available (automatic renewal)
-```
-
-### Logout
-
-Remove stored OAuth tokens:
-
-```bash
-# Logout from specific account
-coragent logout --account your_account
-
-# Logout from all accounts
-coragent logout --all
+coragent auth status                   # show token status
+coragent logout --account your_account   # logout from specific account
+coragent logout --all                  # logout from all accounts
 ```
 
 ### OAuth Environment Variables
@@ -432,50 +289,22 @@ coragent logout --all
 - **UPDATE**: Agent exists with changes → `PUT` with changed top-level fields
 - **NO_CHANGE**: Agent exists, no diff → Skip API call
 
-### Plan Flags
-
-| Flag | Description |
-|------|-------------|
-| `-R, --recursive` | Recursively load agents from subdirectories |
-
-### Apply Flags
-
-| Flag | Description |
-|------|-------------|
-| `-y, --yes` | Skip confirmation prompt |
-| `-R, --recursive` | Recursively load agents from subdirectories |
-| `--eval` | Run eval tests for changed agents after apply |
+| Flag | Commands | Description |
+|------|----------|-------------|
+| `-R, --recursive` | plan, apply, delete, validate | Recursively load agents from subdirectories |
+| `-y, --yes` | apply, delete | Skip confirmation prompt |
+| `--eval` | apply | Run eval tests for changed agents after apply |
 
 ## Delete
 
 Delete agents defined in YAML files. Shows a plan and asks for confirmation before deleting.
 
 ```bash
-# Delete agents in current directory
-coragent delete
-
-# Delete agents from a specific file
-coragent delete agent.yaml
-
-# Delete agents from a directory recursively
-coragent delete ./agents -R
-
-# Skip confirmation prompt
-coragent delete -y
+coragent delete                # current directory
+coragent delete agent.yaml     # specific file
+coragent delete ./agents -R    # recursive
+coragent delete -y             # skip confirmation
 ```
-
-### Delete Flags
-
-| Flag | Description |
-|------|-------------|
-| `-y, --yes` | Skip confirmation prompt |
-| `-R, --recursive` | Recursively load agents from subdirectories |
-
-### Validate Flags
-
-| Flag | Description |
-|------|-------------|
-| `-R, --recursive` | Recursively load agents from subdirectories |
 
 ## Export
 
@@ -489,101 +318,40 @@ coragent export my-agent --out ./my-agent.yaml
 
 ## Run
 
-Run an agent interactively with streaming response and conversation thread support.
-
-If agent-name is omitted, you'll be prompted to select from available agents.
-If `-m` is omitted, you'll be prompted to enter a message interactively.
-
-### Basic Usage
+Run an agent with streaming response. If agent-name or `-m` is omitted, interactive prompts are shown.
 
 ```bash
-# Fully interactive (select agent, then enter message)
-coragent run
-
-# Interactive agent selection with message
-coragent run -m "What are the top sales by region?"
-
-# Specify agent, enter message interactively
-coragent run my-agent
-
-# Specify both agent and message
-coragent run my-agent -m "What are the top sales by region?"
-
-# Start a new conversation thread
-coragent run my-agent --new -m "Starting fresh topic"
-
-# Continue a specific thread
-coragent run my-agent --thread 12345 -m "Follow-up question"
-
-# Single-turn mode (no thread tracking)
-coragent run my-agent --without-thread -m "One-off question"
+coragent run                                           # fully interactive
+coragent run my-agent -m "What are the top sales?"     # specify both
+coragent run my-agent --new -m "Starting fresh topic"  # new thread
+coragent run my-agent --thread 12345 -m "Follow-up"   # continue thread
+coragent run my-agent --without-thread -m "One-off"    # single-turn (no thread)
+coragent run my-agent -m "Query" --show-thinking       # show reasoning
 ```
 
 ### Thread Support
 
-Threads enable multi-turn conversations with context preservation. The CLI transparently manages threads via the Snowflake Cortex Threads API.
-
-| Flag | Behavior |
-|------|----------|
-| (none) | Interactive selection from existing threads, or create new |
-| `--new` | Create a new thread immediately |
-| `--thread <id>` | Continue a specific thread by ID |
-| `--without-thread` | Single-turn request without thread tracking |
-
-Thread state is stored locally in `~/.coragent/threads.json` to track:
-- Thread ID and last message ID (for `parent_message_id`)
-- Last used timestamp
-- Conversation summary
-
-### Display Options
-
-Tool usage (SQL queries, search calls, etc.) is always displayed on stderr automatically.
-
-```bash
-# Show agent's reasoning/thinking process
-coragent run my-agent -m "Complex query" --show-thinking
-
-# Combine with debug for full tool input/output details
-coragent run my-agent -m "Query" --debug
-```
+Threads enable multi-turn conversations via the Snowflake Cortex Threads API. Thread state is stored locally in `~/.coragent/threads.json`. Tool usage is always displayed on stderr.
 
 ### Run Flags
 
 | Flag | Description |
 |------|-------------|
-| `-m, --message` | Message to send to the agent (interactive prompt if omitted) |
+| `-m, --message` | Message to send (interactive prompt if omitted) |
 | `--new` | Start a new conversation thread |
 | `--thread <id>` | Continue a specific thread by ID |
-| `--without-thread` | Run without thread support (single-turn) |
+| `--without-thread` | Single-turn mode (no thread tracking) |
 | `--show-thinking` | Display reasoning tokens on stderr |
 
 ## Project Configuration (`.coragent.toml`)
 
-You can configure coragent behavior using a `.coragent.toml` file. The file is searched in the following order:
-
-1. `.coragent.toml` in the current directory (project root)
-2. `~/.coragent/config.toml`
-
-If no file is found, default values are used.
-
-### Example
+Project-level settings are loaded from `.coragent.toml` (current directory) or `~/.coragent/config.toml`. CLI flags override these values.
 
 ```toml
 [eval]
 output_dir = "./eval-results"
-timestamp_suffix = true
+timestamp_suffix = true   # append UTC timestamp to output filenames
 ```
-
-### Supported fields
-
-| Section | Field | Description |
-|---------|-------|-------------|
-| `[eval]` | `output_dir` | Default output directory for eval reports |
-| `[eval]` | `timestamp_suffix` | Append UTC timestamp to output filenames (default: `false`) |
-
-### Priority
-
-Settings from `.coragent.toml` are overridden by CLI flags. For example, `-o ./other-dir` takes precedence over `output_dir` in the config file.
 
 ## Eval
 
@@ -642,97 +410,33 @@ When `command` is specified, it is executed via `sh -c` with the working directo
 ### Usage
 
 ```bash
-# Evaluate agents in current directory
-coragent eval
-
-# Evaluate a specific spec file
-coragent eval agent.yaml
-
-# Evaluate all agents in a directory
-coragent eval ./agents/
-
-# Recursive directory scan
-coragent eval ./agents/ -R
-
-# Specify output directory
-coragent eval agent.yaml -o ./eval-results
+coragent eval                          # current directory
+coragent eval agent.yaml               # specific file
+coragent eval ./agents/ -R             # recursive
+coragent eval agent.yaml -o ./results  # custom output directory
 ```
 
 ### Output
 
-Two report files are generated per agent:
+Two report files are generated per agent: `{agent_name}_eval.json` (machine-readable) and `{agent_name}_eval.md` (markdown report). With `timestamp_suffix = true` in `.coragent.toml`, filenames include a UTC timestamp (e.g., `{agent_name}_eval_20260212_103000.json`).
 
-- **`{agent_name}_eval.json`** - Machine-readable results with full response text
-- **`{agent_name}_eval.md`** - Markdown report with summary table and collapsible details
-
-When `timestamp_suffix = true` is set in `.coragent.toml`, filenames include a UTC timestamp to preserve past results:
-
-- **`{agent_name}_eval_20260212_103000.json`**
-- **`{agent_name}_eval_20260212_103000.md`**
-
-The output directory is resolved in the following order:
-
-1. `-o` / `--output-dir` CLI flag
-2. `eval.output_dir` in `.coragent.toml`
-3. Default: `.` (current directory)
-
-### Result Icons
+Output directory priority: `-o` flag > `eval.output_dir` in `.coragent.toml` > `.` (current directory).
 
 | Icon | Meaning |
 |------|---------|
-| ✅ | Test passed (tool match and/or command succeeded) |
-| ⚠️ | Test passed, but extra or duplicate tool calls detected (agent may have struggled) |
-| ❌ | Test failed (tool mismatch, command failed, or agent error) |
-
-### Eval Flags
-
-| Flag | Description |
-|------|-------------|
-| `-o, --output-dir` | Output directory for reports (default: `.`, or value from `.coragent.toml`) |
-| `-R, --recursive` | Recursively load agents from subdirectories |
+| ✅ | Test passed |
+| ⚠️ | Passed with extra/duplicate tool calls |
+| ❌ | Test failed |
 
 ## Threads
 
 Manage conversation threads across all agents.
 
-### Usage
-
 ```bash
-# Interactive mode - list threads and delete interactively
-coragent threads
-
-# List all threads (non-interactive)
-coragent threads --list
-
-# Delete a specific thread by ID
-coragent threads --delete 29864464
+coragent threads                   # interactive mode (list, select, delete)
+coragent threads --list            # list all threads (non-interactive)
+coragent threads --delete 29864464   # delete a specific thread by ID
 ```
-
-### Interactive Mode
-
-In interactive mode, you can view all threads and select which ones to delete:
-
-```
-Threads:
-  [1] Thread 29864468 (2 hours ago) - "What are the top sales..."
-      Agent: ACCOUNT/TEST_DB/PUBLIC/MY_AGENT
-  [2] Thread 29864464 (1 day ago) - "Tell me about inventory..."
-      Agent: ACCOUNT/TEST_DB/PUBLIC/OTHER_AGENT
-
-  [d] Delete threads  [q] Quit
-  Select: d
-  Select threads to delete (space-separated, or 'all'): 1 2
-  Delete 2 threads? [y/N]: y
-  Deleted thread 29864468
-  Deleted thread 29864464
-```
-
-### Threads Flags
-
-| Flag | Description |
-|------|-------------|
-| `--list` | List all threads and exit (no API credentials required) |
-| `--delete <id>` | Delete a specific thread by ID |
 
 ## YAML Spec Reference
 
