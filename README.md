@@ -67,7 +67,7 @@ default_connection_name = "myconn"
 [connections.myconn]
 account = "your_account"
 user = "your_user"
-role = "CORTEX_USER"
+role = "CORTEX_ADMIN"
 database = "MY_DATABASE"
 schema = "MY_SCHEMA"
 authenticator = "SNOWFLAKE_JWT"
@@ -87,7 +87,7 @@ default_connection_name = "myconn"
 
 [connections.myconn]
 account = "your_account"
-role = "CORTEX_USER"
+role = "CORTEX_ADMIN"
 database = "MY_DATABASE"
 schema = "MY_SCHEMA"
 authenticator = "OAUTH_AUTHORIZATION_CODE"
@@ -105,7 +105,7 @@ See [OAuth Authentication](#oauth-authentication-experimental) for details on en
 ```bash
 export SNOWFLAKE_ACCOUNT=your_account
 export SNOWFLAKE_USER=your_user
-export SNOWFLAKE_ROLE=CORTEX_USER
+export SNOWFLAKE_ROLE=CORTEX_ADMIN
 # Provide the private key contents directly (PEM or base64-encoded PEM)
 export SNOWFLAKE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----
 ...
@@ -354,6 +354,7 @@ output_dir = "./eval-results"
 timestamp_suffix = true            # append UTC timestamp to output filenames
 judge_model = "llama4-scout"       # LLM model for response scoring (default: llama4-scout)
 response_score_threshold = 70      # minimum score to pass (0 = no threshold)
+ignore_tools = ["another_utility"] # additional tools to exclude from eval (data_to_chart excluded by default)
 ```
 
 ## Eval
@@ -434,6 +435,17 @@ When `expected_response` is specified, the CLI calls `SNOWFLAKE.CORTEX.COMPLETE`
 3. Default: `llama4-scout`
 
 **Score threshold**: Set `response_score_threshold` in `.coragent.toml` to fail tests below the threshold. Default is `0` (no threshold — scores are reported but don't affect pass/fail).
+
+### Ignored Tools
+
+Certain utility tools (e.g. `data_to_chart`) that agents call autonomously are excluded from tool matching and extra-tool-call warnings by default. To add additional tools to the ignore list, set `ignore_tools` in `.coragent.toml`:
+
+```toml
+[eval]
+ignore_tools = ["another_utility_tool"]
+```
+
+The final ignore list is the merge of built-in defaults (`data_to_chart`) and user-defined entries.
 
 The JSON report includes `response_score`, `response_score_reason`, and `judge_model` fields. The Markdown report shows a Score column in the summary table and detailed scoring information in each test's detail section.
 

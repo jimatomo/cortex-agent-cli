@@ -14,10 +14,11 @@ type CoragentConfig struct {
 
 // EvalSettings holds eval-specific configuration.
 type EvalSettings struct {
-	OutputDir              string `toml:"output_dir"`
-	TimestampSuffix        bool   `toml:"timestamp_suffix"`
-	JudgeModel             string `toml:"judge_model"`
-	ResponseScoreThreshold int    `toml:"response_score_threshold"`
+	OutputDir              string   `toml:"output_dir"`
+	TimestampSuffix        bool     `toml:"timestamp_suffix"`
+	JudgeModel             string   `toml:"judge_model"`
+	ResponseScoreThreshold int      `toml:"response_score_threshold"`
+	IgnoreTools            []string `toml:"ignore_tools"`
 }
 
 // LoadCoragentConfig loads configuration from .coragent.toml.

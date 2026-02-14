@@ -21,10 +21,18 @@ import (
 
 const defaultJudgeModel = "llama4-scout"
 
+// defaultIgnoreTools lists tool names that are excluded from eval tool matching
+// by default. These are utility tools (e.g. visualization) that agents may call
+// autonomously and should not affect tool-match evaluation.
+var defaultIgnoreTools = []string{
+	"data_to_chart",
+}
+
 // evalOptions holds resolved eval configuration.
 type evalOptions struct {
 	judgeModel             string
 	responseScoreThreshold int
+	ignoreTools            []string
 }
 
 // judgeResult is the structured output from the LLM judge.
@@ -155,6 +163,43 @@ type EvalReport struct {
 	Results     []EvalResult `json:"results"`
 }
 
+// mergeIgnoreTools combines default and user-defined ignore lists, removing duplicates.
+func mergeIgnoreTools(defaults, userDefined []string) []string {
+	seen := make(map[string]bool, len(defaults)+len(userDefined))
+	var merged []string
+	for _, t := range defaults {
+		if !seen[t] {
+			seen[t] = true
+			merged = append(merged, t)
+		}
+	}
+	for _, t := range userDefined {
+		if !seen[t] {
+			seen[t] = true
+			merged = append(merged, t)
+		}
+	}
+	return merged
+}
+
+// filterIgnoredTools returns a copy of tools with ignored tools removed.
+func filterIgnoredTools(tools []string, ignore []string) []string {
+	if len(ignore) == 0 {
+		return tools
+	}
+	ignoreSet := make(map[string]bool, len(ignore))
+	for _, t := range ignore {
+		ignoreSet[t] = true
+	}
+	var filtered []string
+	for _, t := range tools {
+		if !ignoreSet[t] {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
+}
+
 func newEvalCmd(opts *RootOptions) *cobra.Command {
 	var outputDir string
 	var recursive bool
@@ -238,6 +283,7 @@ Agents without an eval section are skipped.`,
 				eo := evalOptions{
 					judgeModel:             resolveJudgeModel(item.Spec, appCfg),
 					responseScoreThreshold: appCfg.Eval.ResponseScoreThreshold,
+					ignoreTools:            mergeIgnoreTools(defaultIgnoreTools, appCfg.Eval.IgnoreTools),
 				}
 				if err := runEvalForAgent(client, target, item.Spec, outputDir, specDir, appCfg.Eval.TimestampSuffix, eo); err != nil {
 					return fmt.Errorf("%s: %w", item.Path, err)
@@ -363,6 +409,7 @@ func runEvalTest(client *api.Client, target Target, agentName string, tc agent.E
 			result.Error = fmt.Sprintf("run agent: %v", err)
 		}
 
+		toolsUsed = filterIgnoredTools(toolsUsed, eo.ignoreTools)
 		result.ActualTools = toolsUsed
 		result.Response = responseText.String()
 		result.ToolMatch = checkToolMatch(tc.ExpectedTools, toolsUsed)

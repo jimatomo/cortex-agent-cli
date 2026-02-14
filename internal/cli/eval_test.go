@@ -711,6 +711,122 @@ func TestGenerateEvalMarkdownWithScore(t *testing.T) {
 	}
 }
 
+func TestFilterIgnoredTools(t *testing.T) {
+	tests := []struct {
+		name   string
+		tools  []string
+		ignore []string
+		want   []string
+	}{
+		{
+			name:   "removes ignored tool",
+			tools:  []string{"tool_a", "data_to_chart", "tool_b"},
+			ignore: []string{"data_to_chart"},
+			want:   []string{"tool_a", "tool_b"},
+		},
+		{
+			name:   "keeps non-ignored tools",
+			tools:  []string{"tool_a", "tool_b"},
+			ignore: []string{"data_to_chart"},
+			want:   []string{"tool_a", "tool_b"},
+		},
+		{
+			name:   "empty ignore list",
+			tools:  []string{"tool_a", "data_to_chart"},
+			ignore: []string{},
+			want:   []string{"tool_a", "data_to_chart"},
+		},
+		{
+			name:   "nil ignore list",
+			tools:  []string{"tool_a", "data_to_chart"},
+			ignore: nil,
+			want:   []string{"tool_a", "data_to_chart"},
+		},
+		{
+			name:   "all tools ignored",
+			tools:  []string{"data_to_chart"},
+			ignore: []string{"data_to_chart"},
+			want:   nil,
+		},
+		{
+			name:   "empty tools list",
+			tools:  []string{},
+			ignore: []string{"data_to_chart"},
+			want:   nil,
+		},
+		{
+			name:   "multiple ignored tools",
+			tools:  []string{"tool_a", "data_to_chart", "tool_b", "other_util"},
+			ignore: []string{"data_to_chart", "other_util"},
+			want:   []string{"tool_a", "tool_b"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterIgnoredTools(tt.tools, tt.ignore)
+			if len(got) != len(tt.want) {
+				t.Errorf("filterIgnoredTools() = %v, want %v", got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("filterIgnoredTools()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestMergeIgnoreTools(t *testing.T) {
+	tests := []struct {
+		name        string
+		defaults    []string
+		userDefined []string
+		want        []string
+	}{
+		{
+			name:        "defaults only",
+			defaults:    []string{"data_to_chart"},
+			userDefined: nil,
+			want:        []string{"data_to_chart"},
+		},
+		{
+			name:        "user adds new tool",
+			defaults:    []string{"data_to_chart"},
+			userDefined: []string{"another_tool"},
+			want:        []string{"data_to_chart", "another_tool"},
+		},
+		{
+			name:        "deduplication",
+			defaults:    []string{"data_to_chart"},
+			userDefined: []string{"data_to_chart", "another_tool"},
+			want:        []string{"data_to_chart", "another_tool"},
+		},
+		{
+			name:        "both empty",
+			defaults:    nil,
+			userDefined: nil,
+			want:        nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeIgnoreTools(tt.defaults, tt.userDefined)
+			if len(got) != len(tt.want) {
+				t.Errorf("mergeIgnoreTools() = %v, want %v", got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("mergeIgnoreTools()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestResolveJudgeModel(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
 		spec := agent.AgentSpec{}
