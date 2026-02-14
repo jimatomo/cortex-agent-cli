@@ -3,6 +3,7 @@ package auth
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -431,4 +432,263 @@ func TestToAuthConfig_DefaultOAuthRedirectURI(t *testing.T) {
 	if cfg.OAuthRedirectURI != DefaultOAuthRedirectURI {
 		t.Errorf("oauth redirect uri = %q, want default %q", cfg.OAuthRedirectURI, DefaultOAuthRedirectURI)
 	}
+}
+
+// --- DiagnoseConfig tests ---
+
+func clearEnvForDiagnose(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"SNOWFLAKE_HOME", "SNOWFLAKE_DEFAULT_CONNECTION_NAME",
+		"SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
+func TestDiagnoseConfig_NoConfigFile(t *testing.T) {
+	t.Setenv("SNOWFLAKE_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+
+	diag := DiagnoseConfig("")
+	if diag.ConfigPath != "" {
+		t.Errorf("ConfigPath = %q, want empty", diag.ConfigPath)
+	}
+	if len(diag.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(diag.Messages))
+	}
+	if diag.Messages[0].Level != DiagInfo {
+		t.Errorf("level = %d, want DiagInfo", diag.Messages[0].Level)
+	}
+}
+
+func TestDiagnoseConfig_TOMLSyntaxError(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigFile(t, dir, `this is not valid toml [[[`)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+
+	diag := DiagnoseConfig("")
+	if diag.ConfigPath == "" {
+		t.Fatal("expected ConfigPath to be set")
+	}
+	if len(diag.Messages) == 0 {
+		t.Fatal("expected error messages")
+	}
+	if diag.Messages[0].Level != DiagError {
+		t.Errorf("level = %d, want DiagError", diag.Messages[0].Level)
+	}
+	if !containsStr(diag.Messages[0].Message, "TOML syntax error") {
+		t.Errorf("message = %q, want to contain 'TOML syntax error'", diag.Messages[0].Message)
+	}
+}
+
+func TestDiagnoseConfig_EmptyConnections(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigFile(t, dir, `default_connection_name = "dev"`)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+	clearEnvForDiagnose(t)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+
+	diag := DiagnoseConfig("")
+	hasWarning := false
+	for _, msg := range diag.Messages {
+		if msg.Level == DiagWarning && containsStr(msg.Message, "No [connections] entries") {
+			hasWarning = true
+		}
+	}
+	if !hasWarning {
+		t.Errorf("expected warning about empty connections, got %+v", diag.Messages)
+	}
+}
+
+func TestDiagnoseConfig_ConnectionNotFound(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigFile(t, dir, `
+[connections.dev]
+account = "devaccount"
+`)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+	clearEnvForDiagnose(t)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+
+	diag := DiagnoseConfig("production")
+	hasError := false
+	for _, msg := range diag.Messages {
+		if msg.Level == DiagError && containsStr(msg.Message, `"production" not found`) {
+			hasError = true
+		}
+	}
+	if !hasError {
+		t.Errorf("expected error about missing connection, got %+v", diag.Messages)
+	}
+	if len(diag.ConnectionNames) != 1 || diag.ConnectionNames[0] != "dev" {
+		t.Errorf("ConnectionNames = %v, want [dev]", diag.ConnectionNames)
+	}
+}
+
+func TestDiagnoseConfig_NoDefaultConnection(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigFile(t, dir, `
+[connections.dev]
+account = "devaccount"
+
+[connections.staging]
+account = "stagingaccount"
+`)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+	clearEnvForDiagnose(t)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+	t.Setenv("SNOWFLAKE_DEFAULT_CONNECTION_NAME", "")
+
+	diag := DiagnoseConfig("")
+	hasWarning := false
+	for _, msg := range diag.Messages {
+		if msg.Level == DiagWarning && containsStr(msg.Message, "No default_connection_name") {
+			hasWarning = true
+		}
+	}
+	if !hasWarning {
+		t.Errorf("expected warning about no default connection, got %+v", diag.Messages)
+	}
+}
+
+func TestDiagnoseConfig_MissingRequiredFields(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigFile(t, dir, `
+default_connection_name = "dev"
+
+[connections.dev]
+role = "myrole"
+`)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+	clearEnvForDiagnose(t)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+
+	diag := DiagnoseConfig("")
+	accountWarning := false
+	userWarning := false
+	for _, msg := range diag.Messages {
+		if msg.Level == DiagWarning && containsStr(msg.Message, "missing 'account'") {
+			accountWarning = true
+		}
+		if msg.Level == DiagWarning && containsStr(msg.Message, "missing 'user'") {
+			userWarning = true
+		}
+	}
+	if !accountWarning {
+		t.Errorf("expected warning about missing account")
+	}
+	if !userWarning {
+		t.Errorf("expected warning about missing user")
+	}
+}
+
+func TestDiagnoseConfig_OAuthNoUserWarning(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigFile(t, dir, `
+default_connection_name = "dev"
+
+[connections.dev]
+account = "myaccount"
+authenticator = "OAUTH_AUTHORIZATION_CODE"
+`)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+	clearEnvForDiagnose(t)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+
+	diag := DiagnoseConfig("")
+	for _, msg := range diag.Messages {
+		if msg.Level == DiagWarning && containsStr(msg.Message, "missing 'user'") {
+			t.Errorf("unexpected user warning for OAuth connection: %s", msg.Message)
+		}
+	}
+}
+
+func TestDiagnoseConfig_UnknownAuthenticator(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigFile(t, dir, `
+default_connection_name = "dev"
+
+[connections.dev]
+account = "myaccount"
+user = "myuser"
+authenticator = "INVALID_AUTH"
+`)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+	clearEnvForDiagnose(t)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+
+	diag := DiagnoseConfig("")
+	hasWarning := false
+	for _, msg := range diag.Messages {
+		if msg.Level == DiagWarning && containsStr(msg.Message, "Unknown authenticator") {
+			hasWarning = true
+		}
+	}
+	if !hasWarning {
+		t.Errorf("expected warning about unknown authenticator, got %+v", diag.Messages)
+	}
+}
+
+func TestDiagnoseConfig_PrivateKeyFileNotFound(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigFile(t, dir, `
+default_connection_name = "dev"
+
+[connections.dev]
+account = "myaccount"
+user = "myuser"
+private_key_file = "/nonexistent/path/rsa_key.p8"
+`)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+	clearEnvForDiagnose(t)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+
+	diag := DiagnoseConfig("")
+	hasError := false
+	for _, msg := range diag.Messages {
+		if msg.Level == DiagError && containsStr(msg.Message, "Private key file not found") {
+			hasError = true
+		}
+	}
+	if !hasError {
+		t.Errorf("expected error about missing private key file, got %+v", diag.Messages)
+	}
+}
+
+func TestDiagnoseConfig_ValidConfig(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "rsa_key.pem")
+	if err := os.WriteFile(keyPath, []byte("key-content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeConfigFile(t, dir, `
+default_connection_name = "dev"
+
+[connections.dev]
+account = "myaccount"
+user = "myuser"
+authenticator = "SNOWFLAKE_JWT"
+private_key_file = "`+keyPath+`"
+`)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+	clearEnvForDiagnose(t)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+
+	diag := DiagnoseConfig("")
+	if diag.ConfigPath == "" {
+		t.Error("expected ConfigPath to be set")
+	}
+	if diag.ConnectionName != "dev" {
+		t.Errorf("ConnectionName = %q, want 'dev'", diag.ConnectionName)
+	}
+	for _, msg := range diag.Messages {
+		if msg.Level >= DiagWarning {
+			t.Errorf("unexpected issue: [%d] %s", msg.Level, msg.Message)
+		}
+	}
+}
+
+func containsStr(s, substr string) bool {
+	return strings.Contains(s, substr)
 }

@@ -5,10 +5,34 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 )
+
+// DiagLevel indicates the severity of a diagnostic message.
+type DiagLevel int
+
+const (
+	DiagInfo    DiagLevel = iota
+	DiagWarning
+	DiagError
+)
+
+// DiagMessage represents a single diagnostic finding.
+type DiagMessage struct {
+	Level   DiagLevel
+	Message string
+}
+
+// ConfigDiagnostics contains the results of config file analysis.
+type ConfigDiagnostics struct {
+	ConfigPath      string
+	ConnectionName  string
+	ConnectionNames []string
+	Messages        []DiagMessage
+}
 
 // SnowflakeConnection represents a [connections.<name>] section in config.toml.
 type SnowflakeConnection struct {
@@ -185,6 +209,111 @@ func LoadConfig(connectionName string) Config {
 	overlayEnv(&base)
 
 	return base
+}
+
+// DiagnoseConfig analyzes the config.toml file and returns diagnostic information.
+// This is intended for the "auth status" command to help users identify configuration issues.
+func DiagnoseConfig(connectionName string) ConfigDiagnostics {
+	diag := ConfigDiagnostics{}
+
+	// Find config file
+	diag.ConfigPath = findConfigPath()
+	if diag.ConfigPath == "" {
+		diag.Messages = append(diag.Messages, DiagMessage{
+			Level:   DiagInfo,
+			Message: "No config.toml found. Using environment variables only.",
+		})
+		return diag
+	}
+
+	// Parse TOML
+	var cfg snowflakeConfig
+	if _, err := toml.DecodeFile(diag.ConfigPath, &cfg); err != nil {
+		diag.Messages = append(diag.Messages, DiagMessage{
+			Level:   DiagError,
+			Message: fmt.Sprintf("TOML syntax error in %s: %v", diag.ConfigPath, err),
+		})
+		return diag
+	}
+
+	// Collect available connection names
+	for name := range cfg.Connections {
+		diag.ConnectionNames = append(diag.ConnectionNames, name)
+	}
+	sort.Strings(diag.ConnectionNames)
+
+	// Check empty connections section
+	if len(cfg.Connections) == 0 {
+		diag.Messages = append(diag.Messages, DiagMessage{
+			Level:   DiagWarning,
+			Message: "No [connections] entries defined in config.toml.",
+		})
+		return diag
+	}
+
+	// Resolve connection name
+	resolvedName := connectionName
+	if resolvedName == "" {
+		resolvedName = cfg.DefaultConnectionName
+	}
+	if resolvedName == "" {
+		resolvedName = os.Getenv("SNOWFLAKE_DEFAULT_CONNECTION_NAME")
+	}
+	if resolvedName == "" {
+		diag.Messages = append(diag.Messages, DiagMessage{
+			Level:   DiagWarning,
+			Message: fmt.Sprintf("No default_connection_name set and no --connection flag provided. Available connections: %s", strings.Join(diag.ConnectionNames, ", ")),
+		})
+		return diag
+	}
+	diag.ConnectionName = resolvedName
+
+	// Check connection exists
+	conn, ok := cfg.Connections[resolvedName]
+	if !ok {
+		diag.Messages = append(diag.Messages, DiagMessage{
+			Level:   DiagError,
+			Message: fmt.Sprintf("Connection %q not found in config.toml. Available: %s", resolvedName, strings.Join(diag.ConnectionNames, ", ")),
+		})
+		return diag
+	}
+
+	// Check required fields (only warn if env var also missing)
+	if conn.Account == "" && os.Getenv("SNOWFLAKE_ACCOUNT") == "" {
+		diag.Messages = append(diag.Messages, DiagMessage{
+			Level:   DiagWarning,
+			Message: fmt.Sprintf("Connection %q is missing 'account'. Set it in config.toml or via SNOWFLAKE_ACCOUNT.", resolvedName),
+		})
+	}
+	// Check authenticator value
+	authVal := strings.ToUpper(strings.TrimSpace(conn.Authenticator))
+	isOAuth := authVal == "OAUTH_AUTHORIZATION_CODE"
+
+	if conn.User == "" && os.Getenv("SNOWFLAKE_USER") == "" && !isOAuth {
+		diag.Messages = append(diag.Messages, DiagMessage{
+			Level:   DiagWarning,
+			Message: fmt.Sprintf("Connection %q is missing 'user'. Set it in config.toml or via SNOWFLAKE_USER.", resolvedName),
+		})
+	}
+	if authVal != "" && authVal != "SNOWFLAKE_JWT" && authVal != "OAUTH_AUTHORIZATION_CODE" {
+		diag.Messages = append(diag.Messages, DiagMessage{
+			Level:   DiagWarning,
+			Message: fmt.Sprintf("Unknown authenticator %q. Expected: SNOWFLAKE_JWT or OAUTH_AUTHORIZATION_CODE.", conn.Authenticator),
+		})
+	}
+
+	// Check private key file existence
+	if keyFile := firstNonEmptyStr(conn.PrivateKeyFile, conn.PrivateKeyPath); keyFile != "" {
+		expanded := expandHome(keyFile)
+		if _, err := os.Stat(expanded); err != nil {
+			diag.Messages = append(diag.Messages, DiagMessage{
+				Level:   DiagError,
+				Message: fmt.Sprintf("Private key file not found: %s", expanded),
+			})
+		}
+	}
+
+	return diag
 }
 
 // overlayEnv overrides base config fields with environment variables when set.

@@ -54,6 +54,9 @@ func runAuthStatus(rootOpts *RootOptions, opts *authStatusOptions) error {
 	cfg := auth.LoadConfig(rootOpts.Connection)
 	applyAuthOverrides(&cfg, rootOpts)
 
+	// Run diagnostics
+	diag := auth.DiagnoseConfig(rootOpts.Connection)
+
 	// Determine account
 	account := opts.account
 	if account == "" {
@@ -68,6 +71,34 @@ func runAuthStatus(rootOpts *RootOptions, opts *authStatusOptions) error {
 
 	fmt.Println("Authentication Status")
 	fmt.Println("=====================")
+	fmt.Println()
+
+	// Show config file info
+	if diag.ConfigPath != "" {
+		fmt.Printf("Config:  %s\n", diag.ConfigPath)
+	} else {
+		fmt.Println("Config:  (none found)")
+	}
+	if diag.ConnectionName != "" {
+		fmt.Printf("Conn:    %s\n", diag.ConnectionName)
+	}
+
+	// Show diagnostic issues
+	hasIssues := false
+	for _, msg := range diag.Messages {
+		if msg.Level >= auth.DiagWarning {
+			if !hasIssues {
+				fmt.Println()
+				fmt.Println("Issues:")
+				hasIssues = true
+			}
+			prefix := "[WARNING]"
+			if msg.Level == auth.DiagError {
+				prefix = "[ERROR]"
+			}
+			fmt.Printf("  %s %s\n", prefix, msg.Message)
+		}
+	}
 	fmt.Println()
 
 	if account == "" {
@@ -97,11 +128,15 @@ func showKeyPairStatus(cfg auth.Config) error {
 	if cfg.PrivateKey == "" {
 		fmt.Println("Status:  Not configured")
 		fmt.Println()
-		fmt.Println("Missing: SNOWFLAKE_PRIVATE_KEY")
+		fmt.Println("Missing: Private key")
+		fmt.Println("  Set SNOWFLAKE_PRIVATE_KEY environment variable, or configure")
+		fmt.Println("  private_key_file in ~/.snowflake/config.toml")
 	} else if cfg.User == "" {
 		fmt.Println("Status:  Not configured")
 		fmt.Println()
-		fmt.Println("Missing: SNOWFLAKE_USER")
+		fmt.Println("Missing: User")
+		fmt.Println("  Set SNOWFLAKE_USER environment variable, or configure")
+		fmt.Println("  user in ~/.snowflake/config.toml")
 	} else {
 		fmt.Println("Status:  Configured")
 		fmt.Printf("User:    %s\n", strings.ToUpper(cfg.User))
