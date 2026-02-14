@@ -19,30 +19,131 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const defaultJudgeModel = "llama4-scout"
+
+// evalOptions holds resolved eval configuration.
+type evalOptions struct {
+	judgeModel             string
+	responseScoreThreshold int
+}
+
+// judgeResult is the structured output from the LLM judge.
+type judgeResult struct {
+	Score     int    `json:"score"`
+	Reasoning string `json:"reasoning"`
+}
+
+// resolveJudgeModel returns the judge model using priority:
+// agent spec > config.toml > default.
+func resolveJudgeModel(spec agent.AgentSpec, appCfg config.CoragentConfig) string {
+	if spec.Eval != nil && strings.TrimSpace(spec.Eval.JudgeModel) != "" {
+		return spec.Eval.JudgeModel
+	}
+	if strings.TrimSpace(appCfg.Eval.JudgeModel) != "" {
+		return appCfg.Eval.JudgeModel
+	}
+	return defaultJudgeModel
+}
+
+// judgeResponse calls SNOWFLAKE.CORTEX.COMPLETE with structured output to score
+// the actual response against the expected response. Returns score (0-100) and reasoning.
+func judgeResponse(ctx context.Context, client *api.Client, model, question, expectedResponse, actualResponse string) (judgeResult, error) {
+	prompt := fmt.Sprintf(
+		"You are an evaluation judge. Compare the actual response to the expected response for the given question.\n\n"+
+			"Question: %s\n\nExpected Response: %s\n\nActual Response: %s\n\n"+
+			"Score the actual response from 0 to 100 based on how well it matches the expected response in meaning and correctness. "+
+			"Provide a brief reasoning.",
+		question, expectedResponse, actualResponse,
+	)
+
+	// Escape single quotes for SQL string literal
+	escapedPrompt := strings.ReplaceAll(prompt, "'", "''")
+
+	stmt := fmt.Sprintf(`SELECT SNOWFLAKE.CORTEX.COMPLETE(
+    '%s',
+    [{'role': 'user', 'content': '%s'}],
+    {
+        'temperature': 0,
+        'response_format': {
+            'type': 'json',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'score': {'type': 'integer', 'description': '0-100 similarity score'},
+                    'reasoning': {'type': 'string', 'description': 'Brief explanation of the score'}
+                },
+                'required': ['score', 'reasoning']
+            }
+        }
+    }
+) AS response;`, model, escapedPrompt)
+
+	raw, err := client.CortexComplete(ctx, stmt)
+	if err != nil {
+		return judgeResult{}, err
+	}
+
+	return parseJudgeResponse(raw)
+}
+
+// parseJudgeResponse extracts the judgeResult from the COMPLETE function response.
+// With response_format, COMPLETE returns structured_output[0].raw_message containing the result directly.
+func parseJudgeResponse(raw string) (judgeResult, error) {
+	var completeResp struct {
+		StructuredOutput []struct {
+			RawMessage judgeResult `json:"raw_message"`
+		} `json:"structured_output"`
+	}
+	if err := json.Unmarshal([]byte(raw), &completeResp); err != nil {
+		return judgeResult{}, fmt.Errorf("parse complete response: %w", err)
+	}
+	if len(completeResp.StructuredOutput) == 0 {
+		return judgeResult{}, fmt.Errorf("no structured_output in complete response")
+	}
+
+	result := completeResp.StructuredOutput[0].RawMessage
+
+	// Clamp score to 0-100
+	if result.Score < 0 {
+		result.Score = 0
+	}
+	if result.Score > 100 {
+		result.Score = 100
+	}
+
+	return result, nil
+}
+
 // EvalResult holds the result of a single evaluation test case.
 type EvalResult struct {
-	Question       string   `json:"question"`
-	ExpectedTools  []string `json:"expected_tools,omitempty"`
-	ActualTools    []string `json:"actual_tools"`
-	ToolMatch      bool     `json:"tool_match"`
-	ExtraToolCalls bool     `json:"extra_tool_calls"`
-	Response       string   `json:"response"`
-	ThreadID       string   `json:"thread_id"`
-	Command        string   `json:"command,omitempty"`
-	CommandPassed  *bool    `json:"command_passed,omitempty"`
-	CommandOutput  string   `json:"command_output,omitempty"`
-	CommandError   string   `json:"command_error,omitempty"`
-	Passed         bool     `json:"passed"`
-	Error          string   `json:"error,omitempty"`
+	Question            string   `json:"question"`
+	ExpectedTools       []string `json:"expected_tools,omitempty"`
+	ActualTools         []string `json:"actual_tools"`
+	ToolMatch           bool     `json:"tool_match"`
+	ExtraToolCalls      bool     `json:"extra_tool_calls"`
+	Response            string   `json:"response"`
+	ThreadID            string   `json:"thread_id"`
+	Command             string   `json:"command,omitempty"`
+	CommandPassed       *bool    `json:"command_passed,omitempty"`
+	CommandOutput       string   `json:"command_output,omitempty"`
+	CommandError        string   `json:"command_error,omitempty"`
+	ExpectedResponse    string   `json:"expected_response,omitempty"`
+	ResponseScore       *int     `json:"response_score,omitempty"`
+	ResponseScoreReason string   `json:"response_score_reason,omitempty"`
+	JudgeModel          string   `json:"judge_model,omitempty"`
+	ResponseScoreErr    string   `json:"response_score_error,omitempty"`
+	Passed              bool     `json:"passed"`
+	Error               string   `json:"error,omitempty"`
 }
 
 // CommandInput is the JSON payload written to stdin of eval commands.
 type CommandInput struct {
-	Question      string   `json:"question"`
-	Response      string   `json:"response"`
-	ActualTools   []string `json:"actual_tools"`
-	ExpectedTools []string `json:"expected_tools,omitempty"`
-	ThreadID      string   `json:"thread_id"`
+	Question         string   `json:"question"`
+	Response         string   `json:"response"`
+	ActualTools      []string `json:"actual_tools"`
+	ExpectedTools    []string `json:"expected_tools,omitempty"`
+	ExpectedResponse string   `json:"expected_response,omitempty"`
+	ThreadID         string   `json:"thread_id"`
 }
 
 // EvalReport holds the full evaluation report.
@@ -134,7 +235,11 @@ Agents without an eval section are skipped.`,
 				}
 
 				specDir := filepath.Dir(item.Path)
-				if err := runEvalForAgent(client, target, item.Spec, outputDir, specDir, appCfg.Eval.TimestampSuffix); err != nil {
+				eo := evalOptions{
+					judgeModel:             resolveJudgeModel(item.Spec, appCfg),
+					responseScoreThreshold: appCfg.Eval.ResponseScoreThreshold,
+				}
+				if err := runEvalForAgent(client, target, item.Spec, outputDir, specDir, appCfg.Eval.TimestampSuffix, eo); err != nil {
 					return fmt.Errorf("%s: %w", item.Path, err)
 				}
 			}
@@ -161,7 +266,7 @@ func evalOutputPaths(outputDir, agentName string, timestampSuffix bool) (jsonPat
 	return
 }
 
-func runEvalForAgent(client *api.Client, target Target, spec agent.AgentSpec, outputDir, specDir string, timestampSuffix bool) error {
+func runEvalForAgent(client *api.Client, target Target, spec agent.AgentSpec, outputDir, specDir string, timestampSuffix bool, eo evalOptions) error {
 	report := EvalReport{
 		AgentName:   spec.Name,
 		Database:    target.Database,
@@ -176,7 +281,7 @@ func runEvalForAgent(client *api.Client, target Target, spec agent.AgentSpec, ou
 
 	// Run each test case
 	for i, tc := range tests {
-		result := runEvalTest(client, target, spec.Name, tc, i+1, len(tests), specDir)
+		result := runEvalTest(client, target, spec.Name, tc, i+1, len(tests), specDir, eo)
 		report.Results = append(report.Results, result)
 
 		// Write intermediate JSON after each test
@@ -209,12 +314,13 @@ func runEvalForAgent(client *api.Client, target Target, spec agent.AgentSpec, ou
 	return nil
 }
 
-func runEvalTest(client *api.Client, target Target, agentName string, tc agent.EvalTestCase, num, total int, specDir string) EvalResult {
+func runEvalTest(client *api.Client, target Target, agentName string, tc agent.EvalTestCase, num, total int, specDir string, eo evalOptions) EvalResult {
 	result := EvalResult{
-		Question:      tc.Question,
-		ExpectedTools: tc.ExpectedTools,
-		ActualTools:   []string{},
-		Command:       tc.Command,
+		Question:         tc.Question,
+		ExpectedTools:    tc.ExpectedTools,
+		ActualTools:      []string{},
+		Command:          tc.Command,
+		ExpectedResponse: tc.ExpectedResponse,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
@@ -266,11 +372,12 @@ func runEvalTest(client *api.Client, target Target, agentName string, tc agent.E
 	// Run command if specified
 	if tc.Command != "" {
 		input := CommandInput{
-			Question:      tc.Question,
-			Response:      result.Response,
-			ActualTools:   result.ActualTools,
-			ExpectedTools: tc.ExpectedTools,
-			ThreadID:      result.ThreadID,
+			Question:         tc.Question,
+			Response:         result.Response,
+			ActualTools:      result.ActualTools,
+			ExpectedTools:    tc.ExpectedTools,
+			ExpectedResponse: tc.ExpectedResponse,
+			ThreadID:         result.ThreadID,
 		}
 		cmdOut, cmdErr := runEvalCommand(ctx, tc.Command, input, specDir)
 		result.CommandOutput = cmdOut
@@ -284,7 +391,19 @@ func runEvalTest(client *api.Client, target Target, agentName string, tc agent.E
 		}
 	}
 
-	result.Passed = computeOverallPass(result, tc)
+	// Run LLM judge if expected_response is set
+	if strings.TrimSpace(tc.ExpectedResponse) != "" && result.Response != "" {
+		result.JudgeModel = eo.judgeModel
+		jr, err := judgeResponse(ctx, client, eo.judgeModel, tc.Question, tc.ExpectedResponse, result.Response)
+		if err != nil {
+			result.ResponseScoreErr = err.Error()
+		} else {
+			result.ResponseScore = &jr.Score
+			result.ResponseScoreReason = jr.Reasoning
+		}
+	}
+
+	result.Passed = computeOverallPass(result, tc, eo.responseScoreThreshold)
 
 	// Console output
 	label := tc.Question
@@ -302,11 +421,20 @@ func runEvalTest(client *api.Client, target Target, agentName string, tc agent.E
 		if result.CommandPassed != nil && !*result.CommandPassed {
 			reasons = append(reasons, fmt.Sprintf("command failed: %s", result.CommandError))
 		}
+		if result.ResponseScore != nil && eo.responseScoreThreshold > 0 && *result.ResponseScore < eo.responseScoreThreshold {
+			reasons = append(reasons, fmt.Sprintf("score %d < threshold %d", *result.ResponseScore, eo.responseScoreThreshold))
+		}
 		fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ❌ (%s)\n", num, total, label, strings.Join(reasons, "; "))
 	} else if result.ExtraToolCalls {
 		fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ⚠️ (tools: %s) extra tool calls detected\n", num, total, label, strings.Join(result.ActualTools, ", "))
 	} else {
 		fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ✅\n", num, total, label)
+	}
+	if result.ResponseScore != nil {
+		fmt.Fprintf(os.Stderr, "     Score: %d/100 (%s)\n", *result.ResponseScore, result.JudgeModel)
+	}
+	if result.ResponseScoreErr != "" {
+		fmt.Fprintf(os.Stderr, "     Score error: %s\n", result.ResponseScoreErr)
 	}
 	if result.CommandOutput != "" {
 		fmt.Fprint(os.Stderr, result.CommandOutput)
@@ -349,8 +477,9 @@ func runEvalCommand(ctx context.Context, command string, input CommandInput, wor
 }
 
 // computeOverallPass determines the overall pass/fail for a test case.
-// Both tool match (if expected_tools specified) and command (if specified) must pass.
-func computeOverallPass(result EvalResult, tc agent.EvalTestCase) bool {
+// Tool match (if expected_tools specified), command (if specified), and
+// response score threshold (if > 0) must all pass.
+func computeOverallPass(result EvalResult, tc agent.EvalTestCase, responseScoreThreshold int) bool {
 	if result.Error != "" {
 		return false
 	}
@@ -358,6 +487,9 @@ func computeOverallPass(result EvalResult, tc agent.EvalTestCase) bool {
 		return false
 	}
 	if result.CommandPassed != nil && !*result.CommandPassed {
+		return false
+	}
+	if responseScoreThreshold > 0 && result.ResponseScore != nil && *result.ResponseScore < responseScoreThreshold {
 		return false
 	}
 	return true
@@ -415,23 +547,33 @@ func generateEvalMarkdown(report EvalReport) string {
 
 	fmt.Fprintf(&b, "## Agent Evaluation: %s\n\n", report.AgentName)
 
-	// Check if any test has a command
+	// Check optional columns
 	hasCommand := false
+	hasScore := false
 	for _, r := range report.Results {
 		if r.Command != "" {
 			hasCommand = true
-			break
+		}
+		if r.ResponseScore != nil {
+			hasScore = true
 		}
 	}
 
-	// Summary table
+	// Build summary table header dynamically
+	header := "| # | Question | Expected Tools | Actual Tools"
+	sep := "|---|----------|---------------|--------------"
 	if hasCommand {
-		b.WriteString("| # | Question | Expected Tools | Actual Tools | Command | Result |\n")
-		b.WriteString("|---|----------|---------------|--------------|---------|--------|\n")
-	} else {
-		b.WriteString("| # | Question | Expected Tools | Actual Tools | Result |\n")
-		b.WriteString("|---|----------|---------------|--------------|--------|\n")
+		header += " | Command"
+		sep += "|--------"
 	}
+	if hasScore {
+		header += " | Score"
+		sep += "|------"
+	}
+	header += " | Result |\n"
+	sep += "|--------|\n"
+	b.WriteString(header)
+	b.WriteString(sep)
 
 	passed := 0
 	warned := 0
@@ -456,24 +598,25 @@ func generateEvalMarkdown(report EvalReport) string {
 			}
 		}
 
-		if hasCommand {
-			fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s |\n",
-				i+1,
-				r.Question,
-				formatToolList(r.ExpectedTools),
-				formatToolList(r.ActualTools),
-				cmdStatus,
-				icon,
-			)
-		} else {
-			fmt.Fprintf(&b, "| %d | %s | %s | %s | %s |\n",
-				i+1,
-				r.Question,
-				formatToolList(r.ExpectedTools),
-				formatToolList(r.ActualTools),
-				icon,
-			)
+		scoreStr := ""
+		if r.ResponseScore != nil {
+			scoreStr = fmt.Sprintf("%d", *r.ResponseScore)
 		}
+
+		row := fmt.Sprintf("| %d | %s | %s | %s",
+			i+1,
+			r.Question,
+			formatToolList(r.ExpectedTools),
+			formatToolList(r.ActualTools),
+		)
+		if hasCommand {
+			row += fmt.Sprintf(" | %s", cmdStatus)
+		}
+		if hasScore {
+			row += fmt.Sprintf(" | %s", scoreStr)
+		}
+		row += fmt.Sprintf(" | %s |\n", icon)
+		b.WriteString(row)
 	}
 
 	fmt.Fprintf(&b, "\n**Result: %d/%d passed", passed, len(report.Results))
@@ -520,6 +663,22 @@ func generateEvalMarkdown(report EvalReport) string {
 			if r.CommandOutput != "" {
 				fmt.Fprintf(&b, "\n**Command Output:**\n```\n%s\n```\n", r.CommandOutput)
 			}
+		}
+
+		if r.ExpectedResponse != "" {
+			fmt.Fprintf(&b, "\n**Expected Response:** %s\n", r.ExpectedResponse)
+		}
+		if r.ResponseScore != nil {
+			fmt.Fprintf(&b, "**Response Score:** %d/100\n", *r.ResponseScore)
+			if r.ResponseScoreReason != "" {
+				fmt.Fprintf(&b, "**Score Reasoning:** %s\n", r.ResponseScoreReason)
+			}
+			if r.JudgeModel != "" {
+				fmt.Fprintf(&b, "**Judge Model:** %s\n", r.JudgeModel)
+			}
+		}
+		if r.ResponseScoreErr != "" {
+			fmt.Fprintf(&b, "**Score Error:** %s\n", r.ResponseScoreErr)
 		}
 
 		fmt.Fprintf(&b, "\n**Response:**\n\n%s\n", r.Response)

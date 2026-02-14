@@ -455,3 +455,72 @@ deploy:
 		t.Errorf("expected privilege ALL, got %s", agents[0].Spec.Deploy.Grant.AccountRoles[0].Privileges[0])
 	}
 }
+
+func TestLoadAgentWithExpectedResponseOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+eval:
+  tests:
+    - question: "会社概要をまとめて"
+      expected_response: "当社はテクノロジー企業です"
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false)
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	if agents[0].Spec.Eval.Tests[0].ExpectedResponse != "当社はテクノロジー企業です" {
+		t.Errorf("unexpected expected_response: %s", agents[0].Spec.Eval.Tests[0].ExpectedResponse)
+	}
+}
+
+func TestLoadAgentWithJudgeModel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+eval:
+  judge_model: claude-3-5-sonnet
+  tests:
+    - question: "test"
+      expected_response: "response"
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false)
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	if agents[0].Spec.Eval.JudgeModel != "claude-3-5-sonnet" {
+		t.Errorf("unexpected judge_model: %s", agents[0].Spec.Eval.JudgeModel)
+	}
+}
+
+func TestLoadAgentRejectsEvalTestWithoutAnyExpectation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+eval:
+  tests:
+    - question: "test question"
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	_, err = LoadAgents(path, false)
+	if err == nil {
+		t.Fatal("expected error for eval test without any expectation, got nil")
+	}
+}

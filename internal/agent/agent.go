@@ -22,14 +22,16 @@ type DeployConfig struct {
 
 // EvalConfig contains evaluation test cases.
 type EvalConfig struct {
-	Tests []EvalTestCase `yaml:"tests" json:"tests"`
+	Tests      []EvalTestCase `yaml:"tests" json:"tests"`
+	JudgeModel string         `yaml:"judge_model,omitempty" json:"judge_model,omitempty"`
 }
 
 // EvalTestCase defines a single evaluation test case.
 type EvalTestCase struct {
-	Question      string   `yaml:"question" json:"question"`
-	ExpectedTools []string `yaml:"expected_tools,omitempty" json:"expected_tools,omitempty"`
-	Command       string   `yaml:"command,omitempty" json:"command,omitempty"`
+	Question         string   `yaml:"question" json:"question"`
+	ExpectedTools    []string `yaml:"expected_tools,omitempty" json:"expected_tools,omitempty"`
+	ExpectedResponse string   `yaml:"expected_response,omitempty" json:"expected_response,omitempty"`
+	Command          string   `yaml:"command,omitempty" json:"command,omitempty"`
 }
 
 // AgentSpec represents the Cortex Agent YAML/JSON schema payload.

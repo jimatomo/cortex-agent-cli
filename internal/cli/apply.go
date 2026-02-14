@@ -226,7 +226,11 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 			var evalErrors []string
 			for _, item := range evalItems {
 				specDir := filepath.Dir(item.Parsed.Path)
-				if err := runEvalForAgent(client, item.Target, item.Parsed.Spec, outputDir, specDir, appCfg.Eval.TimestampSuffix); err != nil {
+				eo := evalOptions{
+					judgeModel:             resolveJudgeModel(item.Parsed.Spec, appCfg),
+					responseScoreThreshold: appCfg.Eval.ResponseScoreThreshold,
+				}
+				if err := runEvalForAgent(client, item.Target, item.Parsed.Spec, outputDir, specDir, appCfg.Eval.TimestampSuffix, eo); err != nil {
 					evalErrors = append(evalErrors, fmt.Sprintf("%s: %v", item.Parsed.Spec.Name, err))
 				}
 			}

@@ -896,6 +896,37 @@ func normalizeToolResources(input map[string]any) map[string]any {
 	return out
 }
 
+// CortexComplete calls SNOWFLAKE.CORTEX.COMPLETE via the SQL API and returns the
+// raw text content from the model response. The caller provides the model name
+// and the full SQL statement (so structured-output options can be embedded).
+func (c *Client) CortexComplete(ctx context.Context, sqlStmt string) (string, error) {
+	payload := sqlStatementRequest{
+		Statement: sqlStmt,
+	}
+	if strings.TrimSpace(c.authCfg.Warehouse) != "" {
+		payload.Warehouse = c.authCfg.Warehouse
+	}
+	if strings.TrimSpace(c.role) != "" {
+		payload.Role = c.role
+	}
+
+	var resp sqlStatementResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.sqlURL(), payload, &resp); err != nil {
+		return "", fmt.Errorf("cortex complete: %w", err)
+	}
+
+	if len(resp.Data) == 0 || len(resp.Data[0]) == 0 {
+		return "", fmt.Errorf("cortex complete: empty response")
+	}
+
+	raw, ok := resp.Data[0][0].(string)
+	if !ok {
+		return "", fmt.Errorf("cortex complete: unexpected response type")
+	}
+
+	return raw, nil
+}
+
 // ShowGrantsRow represents a row from SHOW GRANTS ON AGENT.
 type ShowGrantsRow struct {
 	Privilege   string

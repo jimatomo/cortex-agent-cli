@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"coragent/internal/agent"
+	"coragent/internal/config"
 )
 
 func TestEvalOutputPaths(t *testing.T) {
@@ -376,7 +377,7 @@ func TestComputeOverallPass(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := computeOverallPass(tt.result, tt.tc)
+			got := computeOverallPass(tt.result, tt.tc, 0)
 			if got != tt.want {
 				t.Errorf("computeOverallPass() = %v, want %v", got, tt.want)
 			}
@@ -509,4 +510,238 @@ func TestGenerateEvalMarkdownWithCommand(t *testing.T) {
 	if !strings.Contains(md, "**Result: 1/2 passed**") {
 		t.Errorf("missing or incorrect result summary, got:\n%s", md)
 	}
+}
+
+func intPtr(n int) *int { return &n }
+
+func TestComputeOverallPassWithResponseScoreThreshold(t *testing.T) {
+	tests := []struct {
+		name      string
+		result    EvalResult
+		tc        agent.EvalTestCase
+		threshold int
+		want      bool
+	}{
+		{
+			name: "score above threshold",
+			result: EvalResult{
+				ResponseScore: intPtr(85),
+			},
+			tc:        agent.EvalTestCase{ExpectedResponse: "expected"},
+			threshold: 70,
+			want:      true,
+		},
+		{
+			name: "score below threshold",
+			result: EvalResult{
+				ResponseScore: intPtr(50),
+			},
+			tc:        agent.EvalTestCase{ExpectedResponse: "expected"},
+			threshold: 70,
+			want:      false,
+		},
+		{
+			name: "score equals threshold",
+			result: EvalResult{
+				ResponseScore: intPtr(70),
+			},
+			tc:        agent.EvalTestCase{ExpectedResponse: "expected"},
+			threshold: 70,
+			want:      true,
+		},
+		{
+			name: "no threshold (0) - score ignored",
+			result: EvalResult{
+				ResponseScore: intPtr(10),
+			},
+			tc:        agent.EvalTestCase{ExpectedResponse: "expected"},
+			threshold: 0,
+			want:      true,
+		},
+		{
+			name: "nil score with threshold - passes",
+			result: EvalResult{
+				ResponseScore: nil,
+			},
+			tc:        agent.EvalTestCase{ExpectedResponse: "expected"},
+			threshold: 70,
+			want:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := computeOverallPass(tt.result, tt.tc, tt.threshold)
+			if got != tt.want {
+				t.Errorf("computeOverallPass() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseJudgeResponse(t *testing.T) {
+	t.Run("valid response", func(t *testing.T) {
+		raw := `{"structured_output":[{"raw_message":{"score":85,"reasoning":"Good match"},"type":"json"}]}`
+		result, err := parseJudgeResponse(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Score != 85 {
+			t.Errorf("score = %d, want 85", result.Score)
+		}
+		if result.Reasoning != "Good match" {
+			t.Errorf("reasoning = %q, want %q", result.Reasoning, "Good match")
+		}
+	})
+
+	t.Run("full COMPLETE response", func(t *testing.T) {
+		raw := `{
+			"created": 1771036914,
+			"model": "llama4-scout",
+			"structured_output": [
+				{
+					"raw_message": {"score": 92, "reasoning": "Both responses correctly identify the expense"},
+					"type": "json"
+				}
+			],
+			"usage": {"completion_tokens": 110, "prompt_tokens": 176, "total_tokens": 286}
+		}`
+		result, err := parseJudgeResponse(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Score != 92 {
+			t.Errorf("score = %d, want 92", result.Score)
+		}
+	})
+
+	t.Run("score clamped to 100", func(t *testing.T) {
+		raw := `{"structured_output":[{"raw_message":{"score":150,"reasoning":"overflow"},"type":"json"}]}`
+		result, err := parseJudgeResponse(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Score != 100 {
+			t.Errorf("score = %d, want 100", result.Score)
+		}
+	})
+
+	t.Run("score clamped to 0", func(t *testing.T) {
+		raw := `{"structured_output":[{"raw_message":{"score":-5,"reasoning":"negative"},"type":"json"}]}`
+		result, err := parseJudgeResponse(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Score != 0 {
+			t.Errorf("score = %d, want 0", result.Score)
+		}
+	})
+
+	t.Run("empty structured_output", func(t *testing.T) {
+		raw := `{"structured_output":[]}`
+		_, err := parseJudgeResponse(raw)
+		if err == nil {
+			t.Fatal("expected error for empty structured_output")
+		}
+	})
+
+	t.Run("missing structured_output", func(t *testing.T) {
+		raw := `{"model":"llama4-scout"}`
+		_, err := parseJudgeResponse(raw)
+		if err == nil {
+			t.Fatal("expected error for missing structured_output")
+		}
+	})
+
+	t.Run("invalid JSON", func(t *testing.T) {
+		_, err := parseJudgeResponse("not json")
+		if err == nil {
+			t.Fatal("expected error for invalid JSON")
+		}
+	})
+}
+
+func TestGenerateEvalMarkdownWithScore(t *testing.T) {
+	report := EvalReport{
+		AgentName:   "TEST-AGENT",
+		Database:    "TEST_DB",
+		Schema:      "PUBLIC",
+		EvaluatedAt: "2025-01-15T10:30:00Z",
+		Results: []EvalResult{
+			{
+				Question:            "Q4の売上を教えて",
+				ExpectedTools:       []string{"revenue_view"},
+				ActualTools:         []string{"revenue_view"},
+				ToolMatch:           true,
+				Response:            "Q4の総売上は1.2億円でした",
+				ExpectedResponse:    "Q4の売上は約1.2億円でした",
+				ResponseScore:       intPtr(92),
+				ResponseScoreReason: "Both correctly identify Q4 revenue",
+				JudgeModel:          "llama4-scout",
+				Passed:              true,
+				ThreadID:            "123",
+			},
+		},
+	}
+
+	md := generateEvalMarkdown(report)
+
+	// Check Score column header
+	if !strings.Contains(md, "| Score") {
+		t.Error("missing Score column header")
+	}
+
+	// Check score value in table
+	if !strings.Contains(md, "92") {
+		t.Error("missing score value in table")
+	}
+
+	// Check detail section
+	if !strings.Contains(md, "**Expected Response:** Q4の売上は約1.2億円でした") {
+		t.Error("missing expected response in details")
+	}
+	if !strings.Contains(md, "**Response Score:** 92/100") {
+		t.Error("missing response score in details")
+	}
+	if !strings.Contains(md, "**Score Reasoning:** Both correctly identify Q4 revenue") {
+		t.Error("missing score reasoning in details")
+	}
+	if !strings.Contains(md, "**Judge Model:** llama4-scout") {
+		t.Error("missing judge model in details")
+	}
+}
+
+func TestResolveJudgeModel(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		spec := agent.AgentSpec{}
+		cfg := config.CoragentConfig{}
+		got := resolveJudgeModel(spec, cfg)
+		if got != defaultJudgeModel {
+			t.Errorf("got %q, want %q", got, defaultJudgeModel)
+		}
+	})
+
+	t.Run("config.toml override", func(t *testing.T) {
+		spec := agent.AgentSpec{}
+		cfg := config.CoragentConfig{}
+		cfg.Eval.JudgeModel = "custom-model"
+		got := resolveJudgeModel(spec, cfg)
+		if got != "custom-model" {
+			t.Errorf("got %q, want %q", got, "custom-model")
+		}
+	})
+
+	t.Run("agent spec overrides config.toml", func(t *testing.T) {
+		spec := agent.AgentSpec{
+			Eval: &agent.EvalConfig{
+				JudgeModel: "spec-model",
+			},
+		}
+		cfg := config.CoragentConfig{}
+		cfg.Eval.JudgeModel = "config-model"
+		got := resolveJudgeModel(spec, cfg)
+		if got != "spec-model" {
+			t.Errorf("got %q, want %q", got, "spec-model")
+		}
+	})
 }

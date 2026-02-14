@@ -136,8 +136,8 @@ func validateAgentSpec(spec AgentSpec) error {
 	}
 	if spec.Eval != nil {
 		for i, tc := range spec.Eval.Tests {
-			if len(tc.ExpectedTools) == 0 && strings.TrimSpace(tc.Command) == "" {
-				return fmt.Errorf("eval.tests[%d]: expected_tools or command is required", i)
+			if len(tc.ExpectedTools) == 0 && strings.TrimSpace(tc.Command) == "" && strings.TrimSpace(tc.ExpectedResponse) == "" {
+				return fmt.Errorf("eval.tests[%d]: expected_tools, expected_response, or command is required", i)
 			}
 		}
 	}

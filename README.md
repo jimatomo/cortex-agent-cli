@@ -13,6 +13,7 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 - Export existing agents to YAML
 - Run agents with streaming response and multi-turn conversation support
 - Evaluate agent accuracy with test cases defined in YAML
+- LLM-as-a-Judge response scoring via Snowflake CORTEX.COMPLETE
 - Recursive directory scanning for multi-agent projects
 - Key Pair (RSA JWT) authentication
 - OAuth authentication (experimental)
@@ -350,12 +351,14 @@ Project-level settings are loaded from `.coragent.toml` (current directory) or `
 ```toml
 [eval]
 output_dir = "./eval-results"
-timestamp_suffix = true   # append UTC timestamp to output filenames
+timestamp_suffix = true            # append UTC timestamp to output filenames
+judge_model = "llama4-scout"       # LLM model for response scoring (default: llama4-scout)
+response_score_threshold = 70      # minimum score to pass (0 = no threshold)
 ```
 
 ## Eval
 
-Evaluate agent accuracy by running test cases defined in the YAML spec file's `eval` section. Each test can verify expected tool usage, run a custom command for validation, or both.
+Evaluate agent accuracy by running test cases defined in the YAML spec file's `eval` section. Each test can verify expected tool usage, score response quality via LLM-as-a-Judge, run a custom command for validation, or any combination.
 
 ### YAML Definition
 
@@ -363,11 +366,22 @@ Add an `eval` section to your agent spec:
 
 ```yaml
 eval:
+  judge_model: claude-3-5-sonnet  # optional, overrides .coragent.toml
   tests:
     # Tool matching only
     - question: "Show me the sales data"
       expected_tools:
         - sample_semantic_view
+
+    # Tool matching + response scoring
+    - question: "What was Q4 revenue?"
+      expected_tools:
+        - revenue_view
+      expected_response: "Q4 revenue was approximately $120M"
+
+    # Response scoring only (no tool check)
+    - question: "Summarize the company overview"
+      expected_response: "The company is a technology enterprise..."
 
     # Tool matching + custom command
     - question: "Search the Snowflake docs"
@@ -385,9 +399,10 @@ eval:
 |-------|----------|-------------|
 | `question` | No | Question to send to the agent. If omitted, the agent call is skipped. |
 | `expected_tools` | No* | List of tool names that must appear in the agent's response |
+| `expected_response` | No* | Expected response text for LLM-as-a-Judge scoring (0-100) |
 | `command` | No* | Shell command to run after the agent responds (or standalone if no question) |
 
-\* At least one of `expected_tools` or `command` is required.
+\* At least one of `expected_tools`, `expected_response`, or `command` is required.
 
 ### Custom Command
 
@@ -399,13 +414,28 @@ When `command` is specified, it is executed via `sh -c` with the working directo
   "response": "the agent's text response",
   "actual_tools": ["tool_a", "tool_b"],
   "expected_tools": ["tool_a"],
+  "expected_response": "the expected response text",
   "thread_id": "12345"
 }
 ```
 
 - **Exit code 0** = pass, **non-zero** = fail
 - stdout/stderr are captured and included in the report
-- If both `expected_tools` and `command` are specified, both must pass for the test to pass
+- If multiple checks are specified (`expected_tools`, `expected_response`, `command`), all must pass for the test to pass
+
+### Response Scoring (LLM-as-a-Judge)
+
+When `expected_response` is specified, the CLI calls `SNOWFLAKE.CORTEX.COMPLETE` with structured output to score the actual response against the expected response on a 0-100 scale. The judge model uses structured output (`response_format`) to guarantee a `{"score": int, "reasoning": string}` JSON response.
+
+**Judge model resolution order** (highest priority first):
+
+1. Agent spec YAML: `eval.judge_model`
+2. `.coragent.toml`: `eval.judge_model`
+3. Default: `llama4-scout`
+
+**Score threshold**: Set `response_score_threshold` in `.coragent.toml` to fail tests below the threshold. Default is `0` (no threshold — scores are reported but don't affect pass/fail).
+
+The JSON report includes `response_score`, `response_score_reason`, and `judge_model` fields. The Markdown report shows a Score column in the summary table and detailed scoring information in each test's detail section.
 
 ### Usage
 
@@ -458,10 +488,17 @@ deploy:
           - MONITOR
 
 eval:
+  judge_model: claude-3-5-sonnet  # optional
   tests:
     - question: "Show me the sales data"
       expected_tools:
         - sample_semantic_view
+    - question: "What was Q4 revenue?"
+      expected_tools:
+        - revenue_view
+      expected_response: "Q4 revenue was approximately $120M"
+    - question: "Summarize the company overview"
+      expected_response: "The company is a technology enterprise..."
     - question: "Search the Snowflake docs"
       expected_tools:
         - snowflake_docs_service
@@ -518,7 +555,7 @@ tool_resources:
 | `name` | Yes | Agent name |
 | `comment` | No | Agent description |
 | `deploy` | No | Deployment settings (database, schema, quote_identifiers, grants) |
-| `eval` | No | Evaluation test cases with tool matching and/or custom commands (not sent to Snowflake API) |
+| `eval` | No | Evaluation test cases with tool matching, response scoring, and/or custom commands (not sent to Snowflake API) |
 | `profile` | No | Agent profile (`display_name`) |
 | `models` | No | Model configuration (`orchestration`: model name) |
 | `instructions` | No | Agent instructions |
