@@ -62,3 +62,6 @@ Thumbs.db
 
 # local tests
 eval-results/
+
+# books (User guide books)
+books/
