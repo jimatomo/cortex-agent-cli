@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"bytes"
 	"fmt"
 	"os"
 
@@ -43,10 +44,14 @@ func newExportCmd(opts *RootOptions) *cobra.Command {
 				return fmt.Errorf("agent %q not found", name)
 			}
 
-			data, err := yaml.Marshal(spec)
-			if err != nil {
+			var buf bytes.Buffer
+			enc := yaml.NewEncoder(&buf)
+			enc.SetIndent(2)
+			if err := enc.Encode(spec); err != nil {
 				return fmt.Errorf("marshal YAML: %w", err)
 			}
+			enc.Close()
+			data := buf.Bytes()
 
 			if outPath == "" {
 				_, err = cmd.OutOrStdout().Write(data)
