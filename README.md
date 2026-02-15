@@ -530,6 +530,8 @@ name: my-support-agent
 comment: Customer support agent
 profile:
   display_name: Support Bot
+  avatar: GlobeAgentIcon
+  color: "var(--chartDim_4-x1kcru7n)"
 models:
   orchestration: claude-4-sonnet
 instructions:
@@ -577,12 +579,20 @@ tool_resources:
 | `comment` | No | Agent description |
 | `deploy` | No | Deployment settings (database, schema, quote_identifiers, grants) |
 | `eval` | No | Evaluation test cases with tool matching, response scoring, and/or custom commands (not sent to Snowflake API) |
-| `profile` | No | Agent profile (`display_name`) |
+| `profile` | No | Agent profile (`display_name`, `avatar`, `color`) |
 | `models` | No | Model configuration (`orchestration`: model name) |
 | `instructions` | No | Agent instructions |
 | `orchestration` | No | Orchestration settings (`budget`) |
 | `tools` | No | Tool definitions |
 | `tool_resources` | No | Per-tool resource configuration |
+
+### Profile Fields
+
+| Field | Description |
+|-------|-------------|
+| `display_name` | Display name shown in the UI |
+| `avatar` | Avatar icon identifier (e.g., `GlobeAgentIcon`) |
+| `color` | Color value for the agent (e.g., `var(--chartDim_4-x1kcru7n)`) |
 
 ### Instructions Fields
 

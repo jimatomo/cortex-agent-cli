@@ -322,8 +322,8 @@ func TestDecodeProfile(t *testing.T) {
 		{"empty string", "", true, "", "", "", false},
 		{"whitespace string", "   ", true, "", "", "", false},
 		{"invalid json", "not json", false, "", "", "", true},
-		{"map with avatar and color", map[string]any{"display_name": "Agent", "avatar": "snowflake", "color": "#0000FF"}, false, "Agent", "snowflake", "#0000FF", false},
-		{"json string with avatar and color", `{"display_name": "Agent", "avatar": "snowflake", "color": "#0000FF"}`, false, "Agent", "snowflake", "#0000FF", false},
+		{"map with avatar and color", map[string]any{"display_name": "Agent", "avatar": "GlobeAgentIcon", "color": "var(--chartDim_4-x1kcru7n)"}, false, "Agent", "GlobeAgentIcon", "var(--chartDim_4-x1kcru7n)", false},
+		{"json string with avatar and color", `{"display_name": "Agent", "avatar": "GlobeAgentIcon", "color": "var(--chartDim_4-x1kcru7n)"}`, false, "Agent", "GlobeAgentIcon", "var(--chartDim_4-x1kcru7n)", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
