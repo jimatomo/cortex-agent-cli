@@ -34,7 +34,7 @@ instructions:
     You are a helpful customer support agent.
 orchestration:
   budget:
-    seconds: 60
+    seconds: 300
     tokens: 16000
 tools:
     - tool_spec:
