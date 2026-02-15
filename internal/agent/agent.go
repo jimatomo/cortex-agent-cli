@@ -52,6 +52,8 @@ type AgentSpec struct {
 
 type Profile struct {
 	DisplayName string `yaml:"display_name,omitempty" json:"display_name,omitempty"`
+	Avatar      string `yaml:"avatar,omitempty" json:"avatar,omitempty"`
+	Color       string `yaml:"color,omitempty" json:"color,omitempty"`
 }
 
 type Models struct {

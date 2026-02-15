@@ -308,18 +308,22 @@ func TestNormalizeToolResources(t *testing.T) {
 
 func TestDecodeProfile(t *testing.T) {
 	tests := []struct {
-		name    string
-		value   any
-		wantNil bool
-		wantDN  string
-		wantErr bool
+		name       string
+		value      any
+		wantNil    bool
+		wantDN     string
+		wantAvatar string
+		wantColor  string
+		wantErr    bool
 	}{
-		{"nil", nil, true, "", false},
-		{"map", map[string]any{"display_name": "Agent"}, false, "Agent", false},
-		{"json string", `{"display_name": "Agent"}`, false, "Agent", false},
-		{"empty string", "", true, "", false},
-		{"whitespace string", "   ", true, "", false},
-		{"invalid json", "not json", false, "", true},
+		{"nil", nil, true, "", "", "", false},
+		{"map", map[string]any{"display_name": "Agent"}, false, "Agent", "", "", false},
+		{"json string", `{"display_name": "Agent"}`, false, "Agent", "", "", false},
+		{"empty string", "", true, "", "", "", false},
+		{"whitespace string", "   ", true, "", "", "", false},
+		{"invalid json", "not json", false, "", "", "", true},
+		{"map with avatar and color", map[string]any{"display_name": "Agent", "avatar": "snowflake", "color": "#0000FF"}, false, "Agent", "snowflake", "#0000FF", false},
+		{"json string with avatar and color", `{"display_name": "Agent", "avatar": "snowflake", "color": "#0000FF"}`, false, "Agent", "snowflake", "#0000FF", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -344,6 +348,12 @@ func TestDecodeProfile(t *testing.T) {
 			}
 			if got.DisplayName != tt.wantDN {
 				t.Errorf("DisplayName = %q, want %q", got.DisplayName, tt.wantDN)
+			}
+			if got.Avatar != tt.wantAvatar {
+				t.Errorf("Avatar = %q, want %q", got.Avatar, tt.wantAvatar)
+			}
+			if got.Color != tt.wantColor {
+				t.Errorf("Color = %q, want %q", got.Color, tt.wantColor)
 			}
 		})
 	}

@@ -653,6 +653,10 @@ func normalizeProfileMap(input map[string]any) map[string]any {
 		case strings.EqualFold(key, "displayName"),
 			strings.EqualFold(key, "display_name"):
 			out["display_name"] = value
+		case strings.EqualFold(key, "avatar"):
+			out["avatar"] = value
+		case strings.EqualFold(key, "color"):
+			out["color"] = value
 		default:
 			out[key] = value
 		}
