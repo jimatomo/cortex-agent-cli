@@ -53,6 +53,24 @@ func resolveJudgeModel(spec agent.AgentSpec, appCfg config.CoragentConfig) strin
 	return defaultJudgeModel
 }
 
+// resolveResponseScoreThreshold returns the agent-level threshold using priority:
+// agent spec > config.toml > 0 (disabled).
+func resolveResponseScoreThreshold(spec agent.AgentSpec, appCfg config.CoragentConfig) int {
+	if spec.Eval != nil && spec.Eval.ResponseScoreThreshold != nil {
+		return *spec.Eval.ResponseScoreThreshold
+	}
+	return appCfg.Eval.ResponseScoreThreshold
+}
+
+// effectiveThreshold returns the threshold for a specific test case using priority:
+// test case > agent-level default.
+func effectiveThreshold(tc agent.EvalTestCase, agentDefault int) int {
+	if tc.ResponseScoreThreshold != nil {
+		return *tc.ResponseScoreThreshold
+	}
+	return agentDefault
+}
+
 // judgeResponse calls SNOWFLAKE.CORTEX.COMPLETE with structured output to score
 // the actual response against the expected response. Returns score (0-100) and reasoning.
 func judgeResponse(ctx context.Context, client *api.Client, model, question, expectedResponse, actualResponse string) (judgeResult, error) {
@@ -282,7 +300,7 @@ Agents without an eval section are skipped.`,
 				specDir := filepath.Dir(item.Path)
 				eo := evalOptions{
 					judgeModel:             resolveJudgeModel(item.Spec, appCfg),
-					responseScoreThreshold: appCfg.Eval.ResponseScoreThreshold,
+					responseScoreThreshold: resolveResponseScoreThreshold(item.Spec, appCfg),
 					ignoreTools:            mergeIgnoreTools(defaultIgnoreTools, appCfg.Eval.IgnoreTools),
 				}
 				if err := runEvalForAgent(client, target, item.Spec, outputDir, specDir, appCfg.Eval.TimestampSuffix, eo); err != nil {
@@ -450,7 +468,8 @@ func runEvalTest(client *api.Client, target Target, agentName string, tc agent.E
 		}
 	}
 
-	result.Passed = computeOverallPass(result, tc, eo.responseScoreThreshold)
+	threshold := effectiveThreshold(tc, eo.responseScoreThreshold)
+	result.Passed = computeOverallPass(result, tc, threshold)
 
 	// Console output
 	label := tc.Question
@@ -468,8 +487,8 @@ func runEvalTest(client *api.Client, target Target, agentName string, tc agent.E
 		if result.CommandPassed != nil && !*result.CommandPassed {
 			reasons = append(reasons, fmt.Sprintf("command failed: %s", result.CommandError))
 		}
-		if result.ResponseScore != nil && eo.responseScoreThreshold > 0 && *result.ResponseScore < eo.responseScoreThreshold {
-			reasons = append(reasons, fmt.Sprintf("score %d < threshold %d", *result.ResponseScore, eo.responseScoreThreshold))
+		if result.ResponseScore != nil && threshold > 0 && *result.ResponseScore < threshold {
+			reasons = append(reasons, fmt.Sprintf("score %d < threshold %d", *result.ResponseScore, threshold))
 		}
 		fmt.Fprintf(os.Stderr, "[%d/%d] %s ... ❌ (%s)\n", num, total, label, strings.Join(reasons, "; "))
 	} else if result.ExtraToolCalls {

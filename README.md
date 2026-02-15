@@ -367,7 +367,8 @@ Add an `eval` section to your agent spec:
 
 ```yaml
 eval:
-  judge_model: claude-3-5-sonnet  # optional, overrides .coragent.toml
+  judge_model: claude-3-5-sonnet    # optional, overrides .coragent.toml
+  response_score_threshold: 80      # optional, overrides .coragent.toml (0 = no threshold)
   tests:
     # Tool matching only
     - question: "Show me the sales data"
@@ -380,9 +381,10 @@ eval:
         - revenue_view
       expected_response: "Q4 revenue was approximately $120M"
 
-    # Response scoring only (no tool check)
+    # Response scoring only (no tool check) with stricter threshold
     - question: "Summarize the company overview"
       expected_response: "The company is a technology enterprise..."
+      response_score_threshold: 90
 
     # Tool matching + custom command
     - question: "Search the Snowflake docs"
@@ -402,6 +404,7 @@ eval:
 | `expected_tools` | No* | List of tool names that must appear in the agent's response |
 | `expected_response` | No* | Expected response text for LLM-as-a-Judge scoring (0-100) |
 | `command` | No* | Shell command to run after the agent responds (or standalone if no question) |
+| `response_score_threshold` | No | Per-test score threshold (overrides agent-level and config.toml) |
 
 \* At least one of `expected_tools`, `expected_response`, or `command` is required.
 
@@ -434,7 +437,12 @@ When `expected_response` is specified, the CLI calls `SNOWFLAKE.CORTEX.COMPLETE`
 2. `.coragent.toml`: `eval.judge_model`
 3. Default: `llama4-scout`
 
-**Score threshold**: Set `response_score_threshold` in `.coragent.toml` to fail tests below the threshold. Default is `0` (no threshold — scores are reported but don't affect pass/fail).
+**Score threshold resolution order** (highest priority first):
+
+1. Test case: `response_score_threshold` on individual test
+2. Agent spec YAML: `eval.response_score_threshold`
+3. `.coragent.toml`: `eval.response_score_threshold`
+4. Default: `0` (no threshold — scores are reported but don't affect pass/fail)
 
 ### Ignored Tools
 
@@ -500,7 +508,8 @@ deploy:
           - MONITOR
 
 eval:
-  judge_model: claude-3-5-sonnet  # optional
+  judge_model: claude-3-5-sonnet    # optional
+  response_score_threshold: 80      # optional (0 = no threshold)
   tests:
     - question: "Show me the sales data"
       expected_tools:

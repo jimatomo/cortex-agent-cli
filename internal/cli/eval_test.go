@@ -861,3 +861,92 @@ func TestResolveJudgeModel(t *testing.T) {
 		}
 	})
 }
+
+func TestResolveResponseScoreThreshold(t *testing.T) {
+	t.Run("default zero", func(t *testing.T) {
+		spec := agent.AgentSpec{}
+		cfg := config.CoragentConfig{}
+		got := resolveResponseScoreThreshold(spec, cfg)
+		if got != 0 {
+			t.Errorf("got %d, want 0", got)
+		}
+	})
+
+	t.Run("config.toml value", func(t *testing.T) {
+		spec := agent.AgentSpec{}
+		cfg := config.CoragentConfig{}
+		cfg.Eval.ResponseScoreThreshold = 70
+		got := resolveResponseScoreThreshold(spec, cfg)
+		if got != 70 {
+			t.Errorf("got %d, want 70", got)
+		}
+	})
+
+	t.Run("spec overrides config.toml", func(t *testing.T) {
+		threshold := 80
+		spec := agent.AgentSpec{
+			Eval: &agent.EvalConfig{
+				ResponseScoreThreshold: &threshold,
+			},
+		}
+		cfg := config.CoragentConfig{}
+		cfg.Eval.ResponseScoreThreshold = 70
+		got := resolveResponseScoreThreshold(spec, cfg)
+		if got != 80 {
+			t.Errorf("got %d, want 80", got)
+		}
+	})
+
+	t.Run("spec zero overrides config.toml", func(t *testing.T) {
+		threshold := 0
+		spec := agent.AgentSpec{
+			Eval: &agent.EvalConfig{
+				ResponseScoreThreshold: &threshold,
+			},
+		}
+		cfg := config.CoragentConfig{}
+		cfg.Eval.ResponseScoreThreshold = 70
+		got := resolveResponseScoreThreshold(spec, cfg)
+		if got != 0 {
+			t.Errorf("got %d, want 0", got)
+		}
+	})
+
+	t.Run("nil eval config uses config.toml", func(t *testing.T) {
+		spec := agent.AgentSpec{Eval: nil}
+		cfg := config.CoragentConfig{}
+		cfg.Eval.ResponseScoreThreshold = 60
+		got := resolveResponseScoreThreshold(spec, cfg)
+		if got != 60 {
+			t.Errorf("got %d, want 60", got)
+		}
+	})
+}
+
+func TestEffectiveThreshold(t *testing.T) {
+	t.Run("uses agent default when test has no override", func(t *testing.T) {
+		tc := agent.EvalTestCase{}
+		got := effectiveThreshold(tc, 70)
+		if got != 70 {
+			t.Errorf("got %d, want 70", got)
+		}
+	})
+
+	t.Run("test case overrides agent default", func(t *testing.T) {
+		threshold := 90
+		tc := agent.EvalTestCase{ResponseScoreThreshold: &threshold}
+		got := effectiveThreshold(tc, 70)
+		if got != 90 {
+			t.Errorf("got %d, want 90", got)
+		}
+	})
+
+	t.Run("test case zero disables threshold", func(t *testing.T) {
+		threshold := 0
+		tc := agent.EvalTestCase{ResponseScoreThreshold: &threshold}
+		got := effectiveThreshold(tc, 70)
+		if got != 0 {
+			t.Errorf("got %d, want 0", got)
+		}
+	})
+}

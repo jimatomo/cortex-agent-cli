@@ -506,6 +506,65 @@ eval:
 	}
 }
 
+func TestLoadAgentWithResponseScoreThreshold(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+eval:
+  response_score_threshold: 80
+  tests:
+    - question: "test"
+      expected_response: "response"
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false)
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	if agents[0].Spec.Eval.ResponseScoreThreshold == nil {
+		t.Fatal("expected response_score_threshold to be set")
+	}
+	if *agents[0].Spec.Eval.ResponseScoreThreshold != 80 {
+		t.Errorf("unexpected response_score_threshold: %d", *agents[0].Spec.Eval.ResponseScoreThreshold)
+	}
+}
+
+func TestLoadAgentWithTestCaseResponseScoreThreshold(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+eval:
+  response_score_threshold: 70
+  tests:
+    - question: "strict test"
+      expected_response: "response"
+      response_score_threshold: 90
+    - question: "default test"
+      expected_response: "response"
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false)
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	tc0 := agents[0].Spec.Eval.Tests[0]
+	if tc0.ResponseScoreThreshold == nil || *tc0.ResponseScoreThreshold != 90 {
+		t.Errorf("test 0: expected response_score_threshold 90, got %v", tc0.ResponseScoreThreshold)
+	}
+	tc1 := agents[0].Spec.Eval.Tests[1]
+	if tc1.ResponseScoreThreshold != nil {
+		t.Errorf("test 1: expected nil response_score_threshold, got %d", *tc1.ResponseScoreThreshold)
+	}
+}
+
 func TestLoadAgentRejectsEvalTestWithoutAnyExpectation(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "agent.yaml")
