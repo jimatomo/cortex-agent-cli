@@ -37,12 +37,19 @@ func newExportCmd(opts *RootOptions) *cobra.Command {
 				return err
 			}
 
-			spec, exists, err := client.GetAgent(context.Background(), target.Database, target.Schema, name)
+			result, err := client.DescribeAgent(context.Background(), target.Database, target.Schema, name)
 			if err != nil {
 				return err
 			}
-			if !exists {
+			if !result.Exists {
 				return fmt.Errorf("agent %q not found", name)
+			}
+			spec := result.Spec
+			for _, col := range result.UnmappedColumns {
+				fmt.Fprintf(os.Stderr, "Warning: DESCRIBE AGENT returned unmapped column %q (not exported)\n", col)
+			}
+			for _, key := range result.UnmappedSpecKeys {
+				fmt.Fprintf(os.Stderr, "Warning: agent_spec contains unmapped key %q (not exported)\n", key)
 			}
 
 			var doc yaml.Node

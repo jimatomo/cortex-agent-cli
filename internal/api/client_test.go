@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
@@ -569,5 +570,102 @@ func TestDecodeProfile_DefaultCase(t *testing.T) {
 	_, err := decodeProfile(json.Number("42"))
 	if err == nil {
 		t.Error("expected error when decoding number as Profile")
+	}
+}
+
+func TestUnmappedColumns(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  map[string]any
+		want []string
+	}{
+		{
+			name: "known columns only",
+			raw:  map[string]any{"agent_spec": "{}", "name": "a", "comment": "c", "profile": "{}", "created_on": "2024-01-01", "database_name": "DB", "owner": "ADMIN", "schema_name": "PUBLIC"},
+			want: nil,
+		},
+		{
+			name: "unknown columns detected",
+			raw:  map[string]any{"agent_spec": "{}", "name": "a", "created_on": "2024-01-01", "new_col": "x"},
+			want: []string{"new_col"},
+		},
+		{
+			name: "empty map",
+			raw:  map[string]any{},
+			want: nil,
+		},
+		{
+			name: "all unknown",
+			raw:  map[string]any{"foo": 1, "bar": 2},
+			want: []string{"bar", "foo"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := unmappedColumns(tt.raw)
+			sort.Strings(got)
+			if len(got) == 0 && len(tt.want) == 0 {
+				return
+			}
+			if fmt.Sprintf("%v", got) != fmt.Sprintf("%v", tt.want) {
+				t.Errorf("unmappedColumns() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetectUnmappedSpecKeys(t *testing.T) {
+	tests := []struct {
+		name     string
+		specJSON any
+		want     []string
+	}{
+		{
+			name:     "known keys only",
+			specJSON: `{"name":"a","comment":"c","models":{},"instructions":{},"orchestration":{},"tools":[],"tool_resources":{},"profile":{}}`,
+			want:     nil,
+		},
+		{
+			name:     "unknown keys detected",
+			specJSON: `{"name":"a","new_feature":"x","another_thing":true}`,
+			want:     []string{"another_thing", "new_feature"},
+		},
+		{
+			name:     "camelCase toolResources not flagged",
+			specJSON: `{"name":"a","toolResources":{}}`,
+			want:     nil,
+		},
+		{
+			name:     "empty JSON object",
+			specJSON: `{}`,
+			want:     nil,
+		},
+		{
+			name:     "non-string value",
+			specJSON: 42,
+			want:     nil,
+		},
+		{
+			name:     "empty string",
+			specJSON: "",
+			want:     nil,
+		},
+		{
+			name:     "invalid JSON",
+			specJSON: "not json",
+			want:     nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectUnmappedSpecKeys(tt.specJSON)
+			sort.Strings(got)
+			if len(got) == 0 && len(tt.want) == 0 {
+				return
+			}
+			if fmt.Sprintf("%v", got) != fmt.Sprintf("%v", tt.want) {
+				t.Errorf("detectUnmappedSpecKeys() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

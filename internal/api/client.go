@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -101,12 +102,27 @@ func (c *Client) DeleteAgent(ctx context.Context, db, schema, name string) error
 	return c.doJSON(ctx, http.MethodDelete, c.agentURL(db, schema, name), nil, nil)
 }
 
+// DescribeResult holds the full result of a DESCRIBE AGENT call, including
+// any columns or agent_spec keys that are not mapped to AgentSpec fields.
+type DescribeResult struct {
+	Spec             agent.AgentSpec
+	Exists           bool
+	UnmappedColumns  []string       // DESCRIBE AGENT SQL columns not processed
+	UnmappedSpecKeys []string       // agent_spec JSON keys not mapped
+	RawColumns       map[string]any // all column data (for debug)
+}
+
 func (c *Client) GetAgent(ctx context.Context, db, schema, name string) (agent.AgentSpec, bool, error) {
-	spec, exists, err := c.describeAgent(ctx, db, schema, name)
-	if err != nil || !exists {
-		return agent.AgentSpec{}, exists, err
+	result, err := c.describeAgentFull(ctx, db, schema, name)
+	if err != nil || !result.Exists {
+		return agent.AgentSpec{}, result.Exists, err
 	}
-	return spec, true, nil
+	return result.Spec, true, nil
+}
+
+// DescribeAgent returns the full describe result including unmapped column/key detection.
+func (c *Client) DescribeAgent(ctx context.Context, db, schema, name string) (DescribeResult, error) {
+	return c.describeAgentFull(ctx, db, schema, name)
 }
 
 func (c *Client) agentsURL(db, schema string) string {
@@ -173,7 +189,7 @@ func (c *Client) sqlURL() string {
 	return u.String()
 }
 
-func (c *Client) describeAgent(ctx context.Context, db, schema, name string) (agent.AgentSpec, bool, error) {
+func (c *Client) describeAgentFull(ctx context.Context, db, schema, name string) (DescribeResult, error) {
 	stmt := fmt.Sprintf("DESCRIBE AGENT %s.%s.%s", identifierSegment(db), identifierSegment(schema), identifierSegment(name))
 	payload := sqlStatementRequest{
 		Statement: stmt,
@@ -190,12 +206,12 @@ func (c *Client) describeAgent(ctx context.Context, db, schema, name string) (ag
 	if err := c.doJSON(ctx, http.MethodPost, c.sqlURL(), payload, &resp); err != nil {
 		// Check if the error indicates the agent does not exist
 		if isNotFoundError(err) {
-			return agent.AgentSpec{}, false, nil
+			return DescribeResult{Exists: false}, nil
 		}
-		return agent.AgentSpec{}, false, err
+		return DescribeResult{}, err
 	}
 	if len(resp.Data) == 0 || len(resp.ResultSetMetaData.RowType) == 0 {
-		return agent.AgentSpec{}, false, nil
+		return DescribeResult{Exists: false}, nil
 	}
 	row := resp.Data[0]
 	raw := make(map[string]any)
@@ -205,15 +221,22 @@ func (c *Client) describeAgent(ctx context.Context, db, schema, name string) (ag
 		}
 	}
 
+	c.debugf("DESCRIBE AGENT raw columns: %v", mapKeys(raw))
+	if specJSON, ok := raw["agent_spec"]; ok {
+		c.debugf("DESCRIBE AGENT agent_spec: %v", specJSON)
+	}
+
 	spec := agent.AgentSpec{}
+	var unmappedSpecKeys []string
 	if specJSON, ok := raw["agent_spec"]; ok {
 		decoded, ok, err := decodeAgentSpecJSON(specJSON, spec, raw)
 		if err != nil {
-			return agent.AgentSpec{}, false, err
+			return DescribeResult{}, err
 		}
 		if ok {
 			spec = decoded
 		}
+		unmappedSpecKeys = detectUnmappedSpecKeys(specJSON)
 	}
 
 	if nameVal, ok := raw["name"].(string); ok && strings.TrimSpace(spec.Name) == "" {
@@ -226,10 +249,87 @@ func (c *Client) describeAgent(ctx context.Context, db, schema, name string) (ag
 		if profile, err := decodeProfile(profileVal); err == nil && profile != nil {
 			spec.Profile = profile
 		} else if err != nil {
-			return agent.AgentSpec{}, false, err
+			return DescribeResult{}, err
 		}
 	}
-	return spec, true, nil
+
+	return DescribeResult{
+		Spec:             spec,
+		Exists:           true,
+		UnmappedColumns:  unmappedColumns(raw),
+		UnmappedSpecKeys: unmappedSpecKeys,
+		RawColumns:       raw,
+	}, nil
+}
+
+// knownDescribeColumns are the SQL column names from DESCRIBE AGENT that
+// the CLI knows how to handle.
+var knownDescribeColumns = map[string]bool{
+	"agent_spec":     true,
+	"name":           true,
+	"comment":        true,
+	"profile":        true,
+	"created_on":     true,
+	"database_name":  true,
+	"owner":          true,
+	"schema_name":    true,
+}
+
+// unmappedColumns returns column names from the DESCRIBE AGENT result that
+// are not in the known set.
+func unmappedColumns(raw map[string]any) []string {
+	var cols []string
+	for key := range raw {
+		if !knownDescribeColumns[key] {
+			cols = append(cols, key)
+		}
+	}
+	sort.Strings(cols)
+	return cols
+}
+
+// knownSpecKeys are the agent_spec JSON keys that the CLI maps to AgentSpec fields.
+var knownSpecKeys = map[string]bool{
+	"name":           true,
+	"comment":        true,
+	"profile":        true,
+	"models":         true,
+	"instructions":   true,
+	"orchestration":  true,
+	"tools":          true,
+	"tool_resources": true,
+}
+
+// detectUnmappedSpecKeys parses the agent_spec JSON value and returns any
+// top-level keys that are not in the known set (after normalizeAgentKey).
+func detectUnmappedSpecKeys(specJSON any) []string {
+	specStr, ok := specJSON.(string)
+	if !ok || strings.TrimSpace(specStr) == "" {
+		return nil
+	}
+	var specMap map[string]any
+	if err := json.Unmarshal([]byte(specStr), &specMap); err != nil {
+		return nil
+	}
+	var keys []string
+	for key := range specMap {
+		normalized := normalizeAgentKey(key)
+		if !knownSpecKeys[normalized] {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// mapKeys returns the keys of a map for debug output.
+func mapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func decodeProfile(value any) (*agent.Profile, error) {
