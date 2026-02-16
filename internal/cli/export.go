@@ -1,10 +1,11 @@
 package cli
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"coragent/internal/api"
 	"coragent/internal/auth"
@@ -44,10 +45,16 @@ func newExportCmd(opts *RootOptions) *cobra.Command {
 				return fmt.Errorf("agent %q not found", name)
 			}
 
+			var doc yaml.Node
+			if err := doc.Encode(spec); err != nil {
+				return fmt.Errorf("marshal YAML: %w", err)
+			}
+			setLiteralStyleForMultiline(&doc)
+
 			var buf bytes.Buffer
 			enc := yaml.NewEncoder(&buf)
 			enc.SetIndent(2)
-			if err := enc.Encode(spec); err != nil {
+			if err := enc.Encode(&doc); err != nil {
 				return fmt.Errorf("marshal YAML: %w", err)
 			}
 			enc.Close()
@@ -67,5 +74,19 @@ func newExportCmd(opts *RootOptions) *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&outPath, "out", "o", "", "Output file path (default: stdout)")
 	return cmd
+}
+
+// setLiteralStyleForMultiline walks a yaml.Node tree and sets LiteralStyle
+// on scalar nodes whose value contains newlines, producing "|" block syntax.
+func setLiteralStyleForMultiline(node *yaml.Node) {
+	if node == nil {
+		return
+	}
+	if node.Kind == yaml.ScalarNode && strings.Contains(node.Value, "\n") {
+		node.Style = yaml.LiteralStyle
+	}
+	for _, child := range node.Content {
+		setLiteralStyleForMultiline(child)
+	}
 }
 
