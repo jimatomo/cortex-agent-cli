@@ -265,14 +265,14 @@ func (c *Client) describeAgentFull(ctx context.Context, db, schema, name string)
 // knownDescribeColumns are the SQL column names from DESCRIBE AGENT that
 // the CLI knows how to handle.
 var knownDescribeColumns = map[string]bool{
-	"agent_spec":     true,
-	"name":           true,
-	"comment":        true,
-	"profile":        true,
-	"created_on":     true,
-	"database_name":  true,
-	"owner":          true,
-	"schema_name":    true,
+	"agent_spec":    true,
+	"name":          true,
+	"comment":       true,
+	"profile":       true,
+	"created_on":    true,
+	"database_name": true,
+	"owner":         true,
+	"schema_name":   true,
 }
 
 // unmappedColumns returns column names from the DESCRIBE AGENT result that
