@@ -46,10 +46,10 @@ func newExportCmd(opts *RootOptions) *cobra.Command {
 			}
 			spec := result.Spec
 			for _, col := range result.UnmappedColumns {
-				fmt.Fprintf(os.Stderr, "Warning: DESCRIBE AGENT returned unmapped column %q (not exported)\n", col)
+				fmt.Fprintf(os.Stderr, "\033[33mWarning: DESCRIBE AGENT returned unmapped column %q (not exported)\033[0m\n", col)
 			}
 			for _, key := range result.UnmappedSpecKeys {
-				fmt.Fprintf(os.Stderr, "Warning: agent_spec contains unmapped key %q (not exported)\n", key)
+				fmt.Fprintf(os.Stderr, "\033[33mWarning: agent_spec contains unmapped key %q (not exported)\033[0m\n", key)
 			}
 
 			var doc yaml.Node
