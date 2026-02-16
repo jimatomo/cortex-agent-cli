@@ -50,6 +50,7 @@ func newExportCmd(opts *RootOptions) *cobra.Command {
 				return fmt.Errorf("marshal YAML: %w", err)
 			}
 			setLiteralStyleForMultiline(&doc)
+			reorderExportKeys(&doc)
 
 			var buf bytes.Buffer
 			enc := yaml.NewEncoder(&buf)
@@ -88,5 +89,101 @@ func setLiteralStyleForMultiline(node *yaml.Node) {
 	for _, child := range node.Content {
 		setLiteralStyleForMultiline(child)
 	}
+}
+
+// reorderExportKeys reorders map keys in the YAML node tree so that
+// tool_spec keys appear as name, type, description first and
+// tool_resources entries have semantic_view / search_service first.
+func reorderExportKeys(node *yaml.Node) {
+	if node == nil {
+		return
+	}
+	// Unwrap document node.
+	if node.Kind == yaml.DocumentNode {
+		for _, child := range node.Content {
+			reorderExportKeys(child)
+		}
+		return
+	}
+	if node.Kind != yaml.MappingNode {
+		for _, child := range node.Content {
+			reorderExportKeys(child)
+		}
+		return
+	}
+
+	// Iterate key-value pairs to find tool_spec and tool_resources mappings.
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valNode := node.Content[i+1]
+
+		if keyNode.Kind == yaml.ScalarNode && keyNode.Value == "tool_spec" && valNode.Kind == yaml.MappingNode {
+			reorderMappingKeys(valNode, []string{"name", "type", "description"})
+		}
+
+		if keyNode.Kind == yaml.ScalarNode && keyNode.Value == "tool_resources" && valNode.Kind == yaml.MappingNode {
+			// Each child of tool_resources is a tool name → resource config mapping.
+			for j := 0; j+1 < len(valNode.Content); j += 2 {
+				resVal := valNode.Content[j+1]
+				if resVal.Kind == yaml.MappingNode {
+					reorderMappingKeys(resVal, []string{"semantic_view", "search_service"})
+				}
+			}
+		}
+
+		// Recurse into value nodes.
+		reorderExportKeys(valNode)
+	}
+}
+
+// reorderMappingKeys moves the specified keys to the front of a mapping node,
+// preserving their relative order. Keys not in the priority list keep their
+// original order after the prioritized keys.
+func reorderMappingKeys(node *yaml.Node, priority []string) {
+	if node.Kind != yaml.MappingNode || len(node.Content) < 4 {
+		return
+	}
+
+	type pair struct {
+		key *yaml.Node
+		val *yaml.Node
+	}
+
+	pairs := make([]pair, 0, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		pairs = append(pairs, pair{node.Content[i], node.Content[i+1]})
+	}
+
+	// Build index of priority keys.
+	priorityIndex := make(map[string]int, len(priority))
+	for i, k := range priority {
+		priorityIndex[k] = i
+	}
+
+	// Split into priority and rest.
+	priorityPairs := make([]pair, len(priority))
+	found := make([]bool, len(priority))
+	var rest []pair
+
+	for _, p := range pairs {
+		if idx, ok := priorityIndex[p.key.Value]; ok {
+			priorityPairs[idx] = p
+			found[idx] = true
+		} else {
+			rest = append(rest, p)
+		}
+	}
+
+	// Rebuild: priority keys first (only those that exist), then rest.
+	result := make([]*yaml.Node, 0, len(node.Content))
+	for i, p := range priorityPairs {
+		if found[i] {
+			result = append(result, p.key, p.val)
+		}
+	}
+	for _, p := range rest {
+		result = append(result, p.key, p.val)
+	}
+	node.Content = result
 }
 
