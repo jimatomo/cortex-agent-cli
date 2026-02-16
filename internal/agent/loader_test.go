@@ -19,7 +19,7 @@ models:
 		t.Fatalf("write file: %v", err)
 	}
 
-	agents, err := LoadAgents(path, false)
+	agents, err := LoadAgents(path, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestLoadAgentsFromDir(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	agents, err := LoadAgents(dir, false)
+	agents, err := LoadAgents(dir, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestLoadAgentsFromDirNonRecursive(t *testing.T) {
 	}
 
 	// Non-recursive should only load top-level file
-	agents, err := LoadAgents(dir, false)
+	agents, err := LoadAgents(dir, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestLoadAgentsFromDirRecursive(t *testing.T) {
 	}
 
 	// Recursive should load both files
-	agents, err := LoadAgents(dir, true)
+	agents, err := LoadAgents(dir, true, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestLoadAgentsSkipsDotFiles(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	agents, err := LoadAgents(dir, false)
+	agents, err := LoadAgents(dir, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestLoadAgentsRejectsUnknownFields(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	_, err = LoadAgents(path, false)
+	_, err = LoadAgents(path, false, "")
 	if err == nil {
 		t.Fatal("expected error for unknown field, got nil")
 	}
@@ -170,7 +170,7 @@ deploy:
 		t.Fatalf("write file: %v", err)
 	}
 
-	agents, err := LoadAgents(path, false)
+	agents, err := LoadAgents(path, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -209,7 +209,7 @@ deploy:
 		t.Fatalf("write file: %v", err)
 	}
 
-	agents, err := LoadAgents(path, false)
+	agents, err := LoadAgents(path, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -234,7 +234,7 @@ deploy:
 		t.Fatalf("write file: %v", err)
 	}
 
-	_, err = LoadAgents(path, false)
+	_, err = LoadAgents(path, false, "")
 	if err == nil {
 		t.Fatal("expected error for invalid privilege, got nil")
 	}
@@ -256,7 +256,7 @@ deploy:
 		t.Fatalf("write file: %v", err)
 	}
 
-	_, err = LoadAgents(path, false)
+	_, err = LoadAgents(path, false, "")
 	if err == nil {
 		t.Fatal("expected error for unqualified database role, got nil")
 	}
@@ -278,7 +278,7 @@ deploy:
 		t.Fatalf("write file: %v", err)
 	}
 
-	_, err = LoadAgents(path, false)
+	_, err = LoadAgents(path, false, "")
 	if err == nil {
 		t.Fatal("expected error for empty role, got nil")
 	}
@@ -299,7 +299,7 @@ deploy:
 		t.Fatalf("write file: %v", err)
 	}
 
-	_, err = LoadAgents(path, false)
+	_, err = LoadAgents(path, false, "")
 	if err == nil {
 		t.Fatal("expected error for empty privileges, got nil")
 	}
@@ -322,7 +322,7 @@ deploy:
 		t.Fatalf("write file: %v", err)
 	}
 
-	agents, err := LoadAgents(path, false)
+	agents, err := LoadAgents(path, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -352,7 +352,7 @@ eval:
 		t.Fatalf("write file: %v", err)
 	}
 
-	agents, err := LoadAgents(path, false)
+	agents, err := LoadAgents(path, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -389,7 +389,7 @@ eval:
 		t.Fatalf("write file: %v", err)
 	}
 
-	_, err = LoadAgents(path, false)
+	_, err = LoadAgents(path, false, "")
 	if err == nil {
 		t.Fatal("expected error for eval test without expected_tools or command, got nil")
 	}
@@ -413,7 +413,7 @@ eval:
 		t.Fatalf("write file: %v", err)
 	}
 
-	agents, err := LoadAgents(path, false)
+	agents, err := LoadAgents(path, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -447,7 +447,7 @@ deploy:
 		t.Fatalf("write file: %v", err)
 	}
 
-	agents, err := LoadAgents(path, false)
+	agents, err := LoadAgents(path, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -470,7 +470,7 @@ eval:
 		t.Fatalf("write file: %v", err)
 	}
 
-	agents, err := LoadAgents(path, false)
+	agents, err := LoadAgents(path, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -497,7 +497,7 @@ eval:
 		t.Fatalf("write file: %v", err)
 	}
 
-	agents, err := LoadAgents(path, false)
+	agents, err := LoadAgents(path, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -521,7 +521,7 @@ eval:
 		t.Fatalf("write file: %v", err)
 	}
 
-	agents, err := LoadAgents(path, false)
+	agents, err := LoadAgents(path, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -551,7 +551,7 @@ eval:
 		t.Fatalf("write file: %v", err)
 	}
 
-	agents, err := LoadAgents(path, false)
+	agents, err := LoadAgents(path, false, "")
 	if err != nil {
 		t.Fatalf("LoadAgents error: %v", err)
 	}
@@ -578,8 +578,110 @@ eval:
 		t.Fatalf("write file: %v", err)
 	}
 
-	_, err = LoadAgents(path, false)
+	_, err = LoadAgents(path, false, "")
 	if err == nil {
 		t.Fatal("expected error for eval test without any expectation, got nil")
+	}
+}
+
+func TestLoadAgentWithVars(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+vars:
+  dev:
+    SNOWFLAKE_DATABASE: DEV_DB
+    SNOWFLAKE_WAREHOUSE: DEV_WH
+  default:
+    SNOWFLAKE_DATABASE: MY_DB
+    SNOWFLAKE_WAREHOUSE: COMPUTE_WH
+name: test-agent
+deploy:
+  database: ${ vars.SNOWFLAKE_DATABASE }
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false, "dev")
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	if agents[0].Spec.Deploy == nil {
+		t.Fatal("expected Deploy to be non-nil")
+	}
+	if agents[0].Spec.Deploy.Database != "DEV_DB" {
+		t.Errorf("expected database DEV_DB, got %s", agents[0].Spec.Deploy.Database)
+	}
+}
+
+func TestLoadAgentWithVarsDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+vars:
+  dev:
+    SNOWFLAKE_DATABASE: DEV_DB
+  default:
+    SNOWFLAKE_DATABASE: MY_DB
+name: test-agent
+deploy:
+  database: ${ vars.SNOWFLAKE_DATABASE }
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	// No --env, should use default
+	agents, err := LoadAgents(path, false, "")
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	if agents[0].Spec.Deploy.Database != "MY_DB" {
+		t.Errorf("expected database MY_DB, got %s", agents[0].Spec.Deploy.Database)
+	}
+}
+
+func TestLoadAgentWithoutVars_BackwardCompatible(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+deploy:
+  database: HARDCODED_DB
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false, "")
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+	if agents[0].Spec.Deploy.Database != "HARDCODED_DB" {
+		t.Errorf("expected database HARDCODED_DB, got %s", agents[0].Spec.Deploy.Database)
+	}
+}
+
+func TestLoadAgentWithVarsRejectsUnknownFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+vars:
+  default:
+    DB: MY_DB
+name: test-agent
+unknown_field: oops
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	_, err = LoadAgents(path, false, "")
+	if err == nil {
+		t.Fatal("expected error for unknown field, got nil")
 	}
 }

@@ -20,7 +20,8 @@ type ParsedAgent struct {
 // LoadAgents loads agent specs from a file or directory.
 // If path is empty, it defaults to the current directory.
 // If recursive is true and path is a directory, it will recursively load from subdirectories.
-func LoadAgents(path string, recursive bool) ([]ParsedAgent, error) {
+// envName selects the vars environment group (empty string uses "default").
+func LoadAgents(path string, recursive bool, envName string) ([]ParsedAgent, error) {
 	if strings.TrimSpace(path) == "" {
 		path = "."
 	}
@@ -31,17 +32,17 @@ func LoadAgents(path string, recursive bool) ([]ParsedAgent, error) {
 	}
 
 	if info.IsDir() {
-		return loadFromDir(path, recursive)
+		return loadFromDir(path, recursive, envName)
 	}
 
-	spec, err := loadFromFile(path)
+	spec, err := loadFromFile(path, envName)
 	if err != nil {
 		return nil, err
 	}
 	return []ParsedAgent{{Path: path, Spec: spec}}, nil
 }
 
-func loadFromDir(dir string, recursive bool) ([]ParsedAgent, error) {
+func loadFromDir(dir string, recursive bool, envName string) ([]ParsedAgent, error) {
 	var files []string
 	if recursive {
 		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
@@ -82,7 +83,7 @@ func loadFromDir(dir string, recursive bool) ([]ParsedAgent, error) {
 
 	results := make([]ParsedAgent, 0, len(files))
 	for _, file := range files {
-		spec, err := loadFromFile(file)
+		spec, err := loadFromFile(file, envName)
 		if err != nil {
 			return nil, err
 		}
@@ -91,14 +92,49 @@ func loadFromDir(dir string, recursive bool) ([]ParsedAgent, error) {
 	return results, nil
 }
 
-func loadFromFile(path string) (AgentSpec, error) {
+func loadFromFile(path string, envName string) (AgentSpec, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return AgentSpec{}, fmt.Errorf("read file %q: %w", path, err)
 	}
 
+	// 1st pass: extract vars section (lenient parse)
+	var wrapper varsWrapper
+	if err := yaml.Unmarshal(data, &wrapper); err != nil {
+		return AgentSpec{}, fmt.Errorf("parse YAML %q: %w", path, err)
+	}
+
+	// Resolve variables if vars section exists
+	resolved, err := resolveVars(wrapper.Vars, envName)
+	if err != nil {
+		return AgentSpec{}, fmt.Errorf("%s: %w", path, err)
+	}
+
+	// 2nd pass: parse into yaml.Node tree for manipulation
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return AgentSpec{}, fmt.Errorf("parse YAML %q: %w", path, err)
+	}
+
+	// Strip vars node before KnownFields check
+	stripVarsNode(&doc)
+
+	// Substitute variable references
+	if err := substituteVars(&doc, resolved); err != nil {
+		return AgentSpec{}, fmt.Errorf("%s: %w", path, err)
+	}
+
+	// Re-encode node to bytes, then decode with KnownFields(true)
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(&doc); err != nil {
+		return AgentSpec{}, fmt.Errorf("re-encode YAML %q: %w", path, err)
+	}
+	enc.Close()
+
 	var spec AgentSpec
-	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec := yaml.NewDecoder(&buf)
 	dec.KnownFields(true)
 	if err := dec.Decode(&spec); err != nil {
 		return AgentSpec{}, fmt.Errorf("parse YAML %q: %w", path, err)

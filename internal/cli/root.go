@@ -14,6 +14,7 @@ type RootOptions struct {
 	Schema           string
 	Role             string
 	Connection       string
+	Env              string
 	QuoteIdentifiers bool
 	Debug            bool
 }
@@ -38,6 +39,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVarP(&opts.Schema, "schema", "s", "", "Target schema")
 	cmd.PersistentFlags().StringVarP(&opts.Role, "role", "r", "", "Snowflake role to use (e.g., CORTEX_USER)")
 	cmd.PersistentFlags().StringVarP(&opts.Connection, "connection", "c", "", "Snowflake CLI connection name (from ~/.snowflake/config.toml)")
+	cmd.PersistentFlags().StringVarP(&opts.Env, "env", "e", "", "Variable environment name (selects vars group in spec file)")
 	cmd.PersistentFlags().BoolVar(&opts.QuoteIdentifiers, "quote-identifiers", false, "Double-quote database/schema names for case-sensitive identifiers")
 	cmd.PersistentFlags().BoolVar(&opts.Debug, "debug", false, "Enable debug logging with trace output")
 

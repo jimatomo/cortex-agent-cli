@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newValidateCmd(_ *RootOptions) *cobra.Command {
+func newValidateCmd(opts *RootOptions) *cobra.Command {
 	var recursive bool
 	cmd := &cobra.Command{
 		Use:   "validate [path]",
@@ -20,7 +20,7 @@ func newValidateCmd(_ *RootOptions) *cobra.Command {
 				path = args[0]
 			}
 
-			specs, err := agent.LoadAgents(path, recursive)
+			specs, err := agent.LoadAgents(path, recursive, opts.Env)
 			if err != nil {
 				return err
 			}

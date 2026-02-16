@@ -28,7 +28,7 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 				path = args[0]
 			}
 
-			specs, err := agent.LoadAgents(path, recursive)
+			specs, err := agent.LoadAgents(path, recursive, opts.Env)
 			if err != nil {
 				return err
 			}

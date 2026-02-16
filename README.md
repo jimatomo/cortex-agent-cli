@@ -14,6 +14,7 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 - Run agents with streaming response and multi-turn conversation support
 - Evaluate agent accuracy with test cases defined in YAML
 - LLM-as-a-Judge response scoring via Snowflake CORTEX.COMPLETE
+- Variable substitution (`vars`) for environment-specific configuration
 - Recursive directory scanning for multi-agent projects
 - Key Pair (RSA JWT) authentication
 - OAuth authentication (experimental)
@@ -133,7 +134,7 @@ instructions:
     You are a helpful customer support agent.
 orchestration:
   budget:
-    seconds: 60
+    seconds: 300
     tokens: 16000
 tools:
   - tool_spec:
@@ -281,6 +282,7 @@ coragent logout --all                  # logout from all accounts
 - `--schema` / `-s`: Target schema
 - `--role` / `-r`: Snowflake role to use
 - `--connection` / `-c`: Snowflake CLI connection name (from `~/.snowflake/config.toml`)
+- `--env` / `-e`: Variable environment name (selects `vars` group in spec file)
 - `--quote-identifiers`: Double-quote database/schema names for case-sensitive identifiers
 - `--debug`: Enable debug logging with stack trace
 
@@ -493,8 +495,19 @@ coragent threads --delete 29864464   # delete a specific thread by ID
 A complete example showing all supported fields:
 
 ```yaml
+vars:
+  dev:
+    SNOWFLAKE_DATABASE: DEV_DB
+    SNOWFLAKE_WAREHOUSE: DEV_WH
+  prod:
+    SNOWFLAKE_DATABASE: PROD_DB
+    SNOWFLAKE_WAREHOUSE: PROD_WH
+  default:
+    SNOWFLAKE_DATABASE: MY_DATABASE
+    SNOWFLAKE_WAREHOUSE: COMPUTE_WH
+
 deploy:
-  database: MY_DATABASE
+  database: ${ vars.SNOWFLAKE_DATABASE }
   schema: MY_SCHEMA
   quote_identifiers: true  # Double-quote database/schema for case-sensitive identifiers
   grant:
@@ -546,7 +559,7 @@ instructions:
     - question: "What is a pivot table?"
 orchestration:
   budget:
-    seconds: 60
+    seconds: 300
     tokens: 16000
 tools:
   - tool_spec:
@@ -562,7 +575,7 @@ tool_resources:
     semantic_view: MY_DATABASE.MY_SCHEMA.SAMPLE_SM
     execution_environment:
       type: warehouse
-      warehouse: COMPUTE_WH
+      warehouse: ${ vars.SNOWFLAKE_WAREHOUSE }
       query_timeout: 60
   snowflake_docs_service:
     search_service: MY_DATABASE.MY_SCHEMA.DOCS_SERVICE
@@ -577,6 +590,7 @@ tool_resources:
 |-------|----------|-------------|
 | `name` | Yes | Agent name |
 | `comment` | No | Agent description |
+| `vars` | No | Environment-specific variables for substitution (see [Variable Substitution](#variable-substitution)) |
 | `deploy` | No | Deployment settings (database, schema, quote_identifiers, grants) |
 | `eval` | No | Evaluation test cases with tool matching, response scoring, and/or custom commands (not sent to Snowflake API) |
 | `profile` | No | Agent profile (`display_name`, `avatar`, `color`) |
@@ -624,6 +638,54 @@ tool_resources:
 | `max_results` | Maximum number of results to return |
 | `id_column` | ID column name |
 | `title_column` | Title column name |
+
+## Variable Substitution
+
+The `vars` section allows you to define environment-specific values in a single YAML file. Use `--env` to select an environment at runtime.
+
+### YAML Definition
+
+```yaml
+vars:
+  dev:
+    SNOWFLAKE_DATABASE: DEV_DB
+    SNOWFLAKE_WAREHOUSE: DEV_WH
+  prod:
+    SNOWFLAKE_DATABASE: PROD_DB
+    SNOWFLAKE_WAREHOUSE: PROD_WH
+  default:
+    SNOWFLAKE_DATABASE: MY_DB
+    SNOWFLAKE_WAREHOUSE: COMPUTE_WH
+
+deploy:
+  database: ${ vars.SNOWFLAKE_DATABASE }
+
+name: my-agent
+tool_resources:
+  my_tool:
+    execution_environment:
+      warehouse: ${ vars.SNOWFLAKE_WAREHOUSE }
+```
+
+### Resolution Rules
+
+1. `--env <name>` selects the named group (e.g., `--env dev` uses `vars.dev`)
+2. Missing variables fall back to the `default` group
+3. If `--env` is not specified, only the `default` group is used
+4. An error is raised if a referenced variable cannot be resolved
+5. OS environment variables are not referenced — all values are defined within the YAML
+
+### Usage
+
+```bash
+coragent plan --env dev          # uses dev variables
+coragent apply --env prod        # uses prod variables
+coragent validate agent.yaml     # uses default variables
+```
+
+Variable references use the syntax `${ vars.VARIABLE_NAME }` and can appear anywhere in scalar values, including as partial strings (e.g., `prefix_${ vars.DB }_suffix`).
+
+The `vars` section is stripped before schema validation, so it does not conflict with `KnownFields` checking.
 
 ## Grant Management
 

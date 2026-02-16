@@ -1,16 +1,23 @@
+vars:
+  default:
+    SNOWFLAKE_DATABASE: TEST_DB
+    SNOWFLAKE_SCHEMA: PUBLIC
+  qa:
+    SNOWFLAKE_SCHEMA: QA
+
 deploy:
-  database: TEST_DB
-  schema: PUBLIC
+  database: ${ vars.SNOWFLAKE_DATABASE }
+  schema: ${ vars.SNOWFLAKE_SCHEMA }
   grant:
     account_roles:
       - role: ANALYST
         privileges:
           - ALL
     database_roles:
-      # - role: TEST_DB.CORTEX_USER
+      # - role: ${ vars.SNOWFLAKE_DATABASE }.CORTEX_USER
       #   privileges:
       #     - USAGE
-      - role: TEST_DB.CORTEX_MONITOR
+      - role: ${ vars.SNOWFLAKE_DATABASE }.CORTEX_MONITOR
         privileges:
           - MONITOR
 
@@ -52,16 +59,13 @@ tools:
         type: cortex_search
 tool_resources:
     sample_semantic_view:
-        execution_environment:
-            type: warehouse
-            warehouse: ""
-        semantic_view: TEST_DB.PUBLIC.SAMPLE_SM
+        semantic_view: ${ vars.SNOWFLAKE_DATABASE }.${ vars.SNOWFLAKE_SCHEMA }.SAMPLE_SM
     sample_semantic_view_2:
         execution_environment:
             query_timeout: 60
             type: warehouse
             warehouse: COMPUTE_WH
-        semantic_view: TEST_DB.PUBLIC.SAMPLE_SM_2
+        semantic_view: ${ vars.SNOWFLAKE_DATABASE }.${ vars.SNOWFLAKE_SCHEMA }.SAMPLE_SM_2
     snowflake_docs_service:
         id_column: SOURCE_URL
         max_results: 4

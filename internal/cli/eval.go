@@ -252,7 +252,7 @@ Agents without an eval section are skipped.`,
 			}
 
 			// 1. Load agents from file or directory
-			specs, err := agent.LoadAgents(path, recursive)
+			specs, err := agent.LoadAgents(path, recursive, opts.Env)
 			if err != nil {
 				return err
 			}
