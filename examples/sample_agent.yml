@@ -35,7 +35,7 @@ comment: Customer support agent
 profile:
   display_name: Support Bot
 models:
-  orchestration: claude-4-sonnet
+  orchestration: auto
 instructions:
   response: |
     You are a helpful customer support agent.
@@ -44,30 +44,34 @@ orchestration:
     seconds: 300
     tokens: 16000
 tools:
-    - tool_spec:
-        description: |-
-            This is a sample semantic view. About income and expense.
-        name: sample_semantic_view
-        type: cortex_analyst_text_to_sql
-    - tool_spec:
-        description: This is a sample semantic view. 2nd
-        name: sample_semantic_view_2
-        type: cortex_analyst_text_to_sql
-    - tool_spec:
-        description: snowflake docs service
-        name: snowflake_docs_service
-        type: cortex_search
+  - tool_spec:
+      description: |-
+        This is a sample semantic view. About income and expense.
+      name: sample_semantic_view
+      type: cortex_analyst_text_to_sql
+  - tool_spec:
+      description: This is a sample semantic view. 2nd
+      name: sample_semantic_view_2
+      type: cortex_analyst_text_to_sql
+  - tool_spec:
+      description: snowflake docs service
+      name: snowflake_docs_service
+      type: cortex_search
 tool_resources:
-    sample_semantic_view:
-        semantic_view: ${ vars.SNOWFLAKE_DATABASE }.${ vars.SNOWFLAKE_SCHEMA }.SAMPLE_SM
-    sample_semantic_view_2:
-        execution_environment:
-            query_timeout: 60
-            type: warehouse
-            warehouse: COMPUTE_WH
-        semantic_view: ${ vars.SNOWFLAKE_DATABASE }.${ vars.SNOWFLAKE_SCHEMA }.SAMPLE_SM_2
-    snowflake_docs_service:
-        id_column: SOURCE_URL
-        max_results: 4
-        search_service: SNOWFLAKE_DOCUMENTATION.SHARED.CKE_SNOWFLAKE_DOCS_SERVICE
-        title_column: DOCUMENT_TITLE
+  sample_semantic_view:
+    semantic_view: ${ vars.SNOWFLAKE_DATABASE }.${ vars.SNOWFLAKE_SCHEMA }.SAMPLE_SM
+    execution_environment:
+      query_timeout: 60
+      type: warehouse
+      warehouse: ""
+  sample_semantic_view_2:
+    execution_environment:
+      query_timeout: 60
+      type: warehouse
+      warehouse: COMPUTE_WH
+    semantic_view: ${ vars.SNOWFLAKE_DATABASE }.${ vars.SNOWFLAKE_SCHEMA }.SAMPLE_SM_2
+  snowflake_docs_service:
+    id_column: SOURCE_URL
+    max_results: 4
+    search_service: SNOWFLAKE_DOCUMENTATION.SHARED.CKE_SNOWFLAKE_DOCS_SERVICE
+    title_column: DOCUMENT_TITLE
