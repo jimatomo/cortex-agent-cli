@@ -1,0 +1,82 @@
+name: Agent Eval
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "examples/**"
+  workflow_dispatch:
+
+concurrency:
+  group: agent-eval-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install coragent
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/jimatomo/cortex-agent-cli/main/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Apply and Eval
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
+          SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+          SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+          SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+          SNOWFLAKE_SCHEMA: ${{ vars.SNOWFLAKE_SCHEMA }}
+        run: coragent apply examples/ -R --yes --eval
+
+      - name: Collect eval results
+        id: collect
+        if: always()
+        run: |
+          BODY="<!-- agent-eval-result -->"
+          BODY="${BODY}\n## Agent Eval Results\n"
+
+          FILES=$(find . -name '*_eval.md' -type f | sort)
+          if [ -z "$FILES" ]; then
+            BODY="${BODY}\nNo eval results found."
+          else
+            for f in $FILES; do
+              BODY="${BODY}\n### $(basename "$f" .md)\n"
+              BODY="${BODY}\n$(cat "$f")\n"
+            done
+          fi
+
+          # Write to file to avoid argument length limits
+          printf '%b' "$BODY" > /tmp/eval-comment.md
+
+      - name: Post PR comment
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          MARKER="<!-- agent-eval-result -->"
+          BODY=$(cat /tmp/eval-comment.md)
+
+          # Find existing comment with the marker
+          COMMENT_ID=$(gh api \
+            "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" \
+            2>/dev/null | head -n 1)
+
+          if [ -n "$COMMENT_ID" ]; then
+            gh api \
+              --method PATCH \
+              "repos/${{ github.repository }}/issues/comments/${COMMENT_ID}" \
+              -f body="$BODY"
+          else
+            gh pr comment "$PR_NUMBER" --body "$BODY"
+          fi
