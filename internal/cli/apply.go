@@ -196,6 +196,8 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 				appliedItems = append(appliedItems, item)
 			}
 
+			color.New(color.FgGreen).Fprintln(os.Stdout, "\nApply complete successfully!")
+
 			if !runEval {
 				return nil
 			}
