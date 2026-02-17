@@ -1,9 +1,9 @@
 vars:
   default:
     SNOWFLAKE_DATABASE: TEST_DB
-    SNOWFLAKE_SCHEMA: PUBLIC
-  qa:
     SNOWFLAKE_SCHEMA: QA
+  prod:
+    SNOWFLAKE_SCHEMA: PUBLIC
 
 deploy:
   database: ${ vars.SNOWFLAKE_DATABASE }
@@ -46,7 +46,7 @@ orchestration:
 tools:
     - tool_spec:
         description: |-
-            This is a sample semantic view.
+            This is a sample semantic view. About income and expense.
         name: sample_semantic_view
         type: cortex_analyst_text_to_sql
     - tool_spec:
