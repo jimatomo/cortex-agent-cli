@@ -1,5 +1,5 @@
 # 公式 Go イメージ (Debian Bookworm) をベースにする
-FROM golang:1.23-bookworm
+FROM golang:1.24-bookworm
 
 # 共通依存と vscode ユーザー（devcontainer 用）
 RUN apt-get update && apt-get install -y --no-install-recommends \
