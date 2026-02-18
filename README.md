@@ -14,7 +14,7 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 - Run agents with streaming response and multi-turn conversation support
 - Evaluate agent accuracy with test cases defined in YAML
 - LLM-as-a-Judge response scoring via Snowflake CORTEX.COMPLETE
-- Variable substitution (`vars`) for environment-specific configuration
+- Variable substitution (`vars` and `env`) for environment-specific configuration
 - Recursive directory scanning for multi-agent projects
 - Key Pair (RSA JWT) authentication
 - OAuth authentication (experimental)
@@ -641,9 +641,16 @@ tool_resources:
 
 ## Variable Substitution
 
-The `vars` section allows you to define environment-specific values in a single YAML file. Use `--env` to select an environment at runtime.
+Two substitution syntaxes are supported and can be mixed in the same file:
 
-### YAML Definition
+| Syntax | Source |
+|--------|--------|
+| `${ vars.VARIABLE_NAME }` | `vars:` section in the YAML file |
+| `${ env.VARIABLE_NAME }` | OS environment variable |
+
+### `vars` substitution
+
+The `vars` section allows you to define environment-specific values in a single YAML file. Use `--env` to select an environment at runtime.
 
 ```yaml
 vars:
@@ -667,15 +674,12 @@ tool_resources:
       warehouse: ${ vars.SNOWFLAKE_WAREHOUSE }
 ```
 
-### Resolution Rules
+**Resolution rules:**
 
 1. `--env <name>` selects the named group (e.g., `--env dev` uses `vars.dev`)
 2. Missing variables fall back to the `default` group
 3. If `--env` is not specified, only the `default` group is used
 4. An error is raised if a referenced variable cannot be resolved
-5. OS environment variables are not referenced — all values are defined within the YAML
-
-### Usage
 
 ```bash
 coragent plan --env dev          # uses dev variables
@@ -683,7 +687,45 @@ coragent apply --env prod        # uses prod variables
 coragent validate agent.yaml     # uses default variables
 ```
 
-Variable references use the syntax `${ vars.VARIABLE_NAME }` and can appear anywhere in scalar values, including as partial strings (e.g., `prefix_${ vars.DB }_suffix`).
+### `env` substitution
+
+Use `${ env.VARIABLE_NAME }` to read values directly from OS environment variables. This is useful for CI/CD pipelines and Docker containers where secrets or deployment targets are provided via the environment instead of hard-coding them in YAML.
+
+```yaml
+deploy:
+  database: ${ env.MY_DATABASE }
+  schema: ${ env.MY_SCHEMA }
+
+instructions:
+  response: ${ env.AGENT_SYSTEM_PROMPT }
+```
+
+```bash
+export MY_DATABASE=PROD_DB
+export MY_SCHEMA=PUBLIC
+export AGENT_SYSTEM_PROMPT="You are a helpful assistant."
+coragent apply
+```
+
+An error is raised if a referenced environment variable is not set.
+
+### Mixing both syntaxes
+
+`${ vars.XXX }` and `${ env.XXX }` can appear in the same file or even the same value:
+
+```yaml
+vars:
+  default:
+    WAREHOUSE: COMPUTE_WH
+
+tool_resources:
+  my_tool:
+    semantic_view: ${ env.MY_DATABASE }.${ env.MY_SCHEMA }.MY_VIEW
+    execution_environment:
+      warehouse: ${ vars.WAREHOUSE }
+```
+
+Variable references can appear anywhere in scalar values, including as partial strings (e.g., `prefix_${ vars.DB }_suffix`).
 
 The `vars` section is stripped before schema validation, so it does not conflict with `KnownFields` checking.
 

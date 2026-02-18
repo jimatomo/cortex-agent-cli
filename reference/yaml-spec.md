@@ -105,11 +105,20 @@ tool_resources:
 | `tools` | No | Tool definitions |
 | `tool_resources` | No | Per-tool resource configuration |
 
-## `vars` (Variable Substitution)
+## Variable Substitution
 
-The `vars` section defines environment-specific variables that are substituted before the YAML is parsed.
+Two substitution syntaxes are supported and can be mixed freely:
 
-### Structure
+| Syntax | Source |
+|--------|--------|
+| `${ vars.KEY }` | `vars:` section in the YAML file |
+| `${ env.KEY }` | OS environment variable |
+
+Both can appear anywhere in scalar values, including partial strings and multiple references in a single value.
+
+### `vars` — YAML-defined variables
+
+The `vars` section defines environment-specific variables resolved via `--env`.
 
 ```yaml
 vars:
@@ -121,20 +130,15 @@ vars:
     KEY: prod_value
 ```
 
-### Reference Syntax
-
-Use `${ vars.KEY }` anywhere in a scalar value:
-
 ```yaml
 deploy:
-  database: ${ vars.DATABASE }                          # Full replacement
-  schema: ${ vars.SCHEMA }
+  database: ${ vars.DATABASE }                                    # Full replacement
 tool_resources:
   my_tool:
-    semantic_view: ${ vars.DATABASE }.${ vars.SCHEMA }.MY_VIEW  # Partial / multiple refs
+    semantic_view: ${ vars.DATABASE }.${ vars.SCHEMA }.MY_VIEW    # Partial / multiple refs
 ```
 
-### Resolution Rules
+**Resolution rules:**
 
 1. If `--env <name>` is specified, values from that environment are used first.
 2. Any keys missing in the selected environment fall back to `default`.
@@ -142,12 +146,38 @@ tool_resources:
 4. If a referenced variable has no value in either the selected environment or `default`, an error is raised.
 5. If `--env` specifies an unknown environment name, it falls back entirely to `default`.
 
-### CLI Usage
-
 ```bash
 coragent plan agent.yml                # uses vars.default only
 coragent plan agent.yml --env dev      # uses vars.dev, fallback to vars.default
 coragent apply agent.yml --env prod    # uses vars.prod, fallback to vars.default
+```
+
+### `env` — OS environment variables
+
+Use `${ env.KEY }` to read values directly from OS environment variables. No `vars:` section is required. An error is raised if the referenced environment variable is not set.
+
+```yaml
+deploy:
+  database: ${ env.MY_DATABASE }
+  schema: ${ env.MY_SCHEMA }
+instructions:
+  response: ${ env.AGENT_SYSTEM_PROMPT }
+```
+
+```bash
+export MY_DATABASE=PROD_DB
+export MY_SCHEMA=PUBLIC
+coragent apply agent.yml
+```
+
+### Mixing both syntaxes
+
+`${ vars.KEY }` and `${ env.KEY }` can be used together in the same file or the same value:
+
+```yaml
+tool_resources:
+  my_tool:
+    semantic_view: ${ env.MY_DATABASE }.${ vars.SCHEMA }.MY_VIEW
 ```
 
 ## `instructions` Sub-Fields

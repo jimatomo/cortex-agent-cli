@@ -9,7 +9,7 @@ coragent resolves configuration in the following priority order (lower number = 
 
 2. **YAML `deploy` Section**
    Only `deploy.database` and `deploy.schema` (other auth-related settings cannot be specified in YAML).
-   These values may themselves contain `${ vars.* }` references that are resolved first.
+   These values may themselves contain `${ vars.* }` or `${ env.* }` references that are resolved first.
 
 3. **Environment Variables**
    - `SNOWFLAKE_ACCOUNT`
@@ -25,20 +25,38 @@ coragent resolves configuration in the following priority order (lower number = 
 4. **config.toml**
    `~/.snowflake/config.toml` (or `$SNOWFLAKE_HOME/config.toml`, etc.)
 
-## Variable Substitution (`vars` + `--env`)
+## Variable Substitution
 
-The `vars` section in YAML defines per-environment variable groups. The `--env` flag (or `-e`) selects which group to use.
+Two syntaxes are supported and can be mixed freely:
 
-Resolution order for variable values:
+| Syntax | Source |
+|--------|--------|
+| `${ vars.KEY }` | `vars:` section in the YAML file, selected via `--env` |
+| `${ env.KEY }` | OS environment variable |
+
+Both are resolved **before** any other YAML processing, so `deploy.database`, `tool_resources`, and all other fields can use either syntax.
+
+### `vars` + `--env`
+
+The `vars` section defines per-environment variable groups. The `--env` flag (or `-e`) selects which group to use.
+
+Resolution order for `${ vars.KEY }`:
 1. Selected environment (`vars.<env_name>`)
 2. Fallback to `vars.default`
 3. Error if variable is not found in either
 
-This substitution happens **before** any other YAML processing, so `deploy.database`, `tool_resources`, and all other fields can use `${ vars.* }` references.
-
 ```bash
 coragent apply agent.yml --env prod    # vars.prod → vars.default fallback
 coragent apply agent.yml               # vars.default only
+```
+
+### `env`
+
+`${ env.KEY }` reads the value from the OS environment at the time the command runs. An error is raised if the variable is not set. No `vars:` section is needed.
+
+```bash
+export MY_DATABASE=PROD_DB
+coragent apply agent.yml               # ${ env.MY_DATABASE } → PROD_DB
 ```
 
 ## config.toml Search Order

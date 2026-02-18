@@ -7,6 +7,68 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestSubstituteVars_EnvRef(t *testing.T) {
+	t.Setenv("MY_DATABASE", "PROD_DB")
+	input := `name: ${ env.MY_DATABASE }`
+	node := mustParseNode(t, input)
+
+	if err := substituteVars(node, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := mustEncodeNode(t, node)
+	if !strings.Contains(output, "PROD_DB") {
+		t.Errorf("expected PROD_DB in output, got:\n%s", output)
+	}
+}
+
+func TestSubstituteVars_EnvRef_Undefined_Error(t *testing.T) {
+	input := `name: ${ env.UNDEFINED_VAR_XYZ }`
+	node := mustParseNode(t, input)
+
+	err := substituteVars(node, nil)
+	if err == nil {
+		t.Fatal("expected error for undefined env variable, got nil")
+	}
+	if !strings.Contains(err.Error(), "UNDEFINED_VAR_XYZ") {
+		t.Errorf("expected error to mention UNDEFINED_VAR_XYZ, got: %s", err.Error())
+	}
+}
+
+func TestSubstituteVars_MixedEnvAndVars(t *testing.T) {
+	t.Setenv("MY_SCHEMA", "PUBLIC")
+	input := `conn: ${ vars.DB }.${ env.MY_SCHEMA }`
+	node := mustParseNode(t, input)
+	resolved := map[string]string{"DB": "MY_DATABASE"}
+
+	if err := substituteVars(node, resolved); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := mustEncodeNode(t, node)
+	if !strings.Contains(output, "MY_DATABASE.PUBLIC") {
+		t.Errorf("expected MY_DATABASE.PUBLIC in output, got:\n%s", output)
+	}
+}
+
+func TestSubstituteVars_EnvRef_NoVarsSection(t *testing.T) {
+	t.Setenv("AGENT_SYSTEM_PROMPT", "You are a helpful assistant.")
+	input := `
+deploy:
+  database: ${ env.AGENT_SYSTEM_PROMPT }
+`
+	node := mustParseNode(t, input)
+
+	if err := substituteVars(node, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := mustEncodeNode(t, node)
+	if !strings.Contains(output, "You are a helpful assistant.") {
+		t.Errorf("expected substituted value in output, got:\n%s", output)
+	}
+}
+
 func TestResolveVars_WithEnv(t *testing.T) {
 	vars := VarsConfig{
 		"dev":     {"DB": "DEV_DB", "WH": "DEV_WH"},

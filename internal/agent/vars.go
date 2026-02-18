@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 
 	"gopkg.in/yaml.v3"
@@ -18,6 +19,9 @@ type varsWrapper struct {
 
 // varPattern matches ${ vars.VARIABLE_NAME } with optional whitespace.
 var varPattern = regexp.MustCompile(`\$\{\s*vars\.(\w+)\s*\}`)
+
+// envPattern matches ${ env.VARIABLE_NAME } with optional whitespace.
+var envPattern = regexp.MustCompile(`\$\{\s*env\.(\w+)\s*\}`)
 
 // resolveVars returns a flat map of variable values for the given environment.
 // Resolution order:
@@ -72,11 +76,8 @@ func resolveVars(vars VarsConfig, envName string) (map[string]string, error) {
 }
 
 // substituteVars recursively walks the yaml.Node tree and replaces
-// ${ vars.XXX } references in scalar values with resolved values.
+// ${ vars.XXX } and ${ env.XXX } references in scalar values.
 func substituteVars(node *yaml.Node, resolved map[string]string) error {
-	if len(resolved) == 0 {
-		return nil
-	}
 	return walkAndSubstitute(node, resolved)
 }
 
@@ -101,8 +102,12 @@ func walkAndSubstitute(node *yaml.Node, resolved map[string]string) error {
 			}
 		}
 	case yaml.ScalarNode:
-		if varPattern.MatchString(node.Value) {
+		if varPattern.MatchString(node.Value) || envPattern.MatchString(node.Value) {
 			replaced, err := replaceVarRefs(node.Value, resolved)
+			if err != nil {
+				return err
+			}
+			replaced, err = replaceEnvRefs(replaced)
 			if err != nil {
 				return err
 			}
@@ -127,6 +132,32 @@ func replaceVarRefs(s string, resolved map[string]string) (string, error) {
 		val, ok := resolved[varName]
 		if !ok {
 			replaceErr = fmt.Errorf("vars: undefined variable %q", varName)
+			return match
+		}
+		return val
+	})
+	if replaceErr != nil {
+		return "", replaceErr
+	}
+	return result, nil
+}
+
+// replaceEnvRefs replaces all ${ env.XXX } occurrences using os.Getenv.
+// Returns an error if the environment variable is not set.
+func replaceEnvRefs(s string) (string, error) {
+	var replaceErr error
+	result := envPattern.ReplaceAllStringFunc(s, func(match string) string {
+		if replaceErr != nil {
+			return match
+		}
+		sub := envPattern.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+		varName := sub[1]
+		val, ok := os.LookupEnv(varName)
+		if !ok {
+			replaceErr = fmt.Errorf("env: environment variable %q is not set", varName)
 			return match
 		}
 		return val
