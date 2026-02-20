@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -998,6 +999,311 @@ func normalizeToolResources(input map[string]any) map[string]any {
 	}
 
 	return out
+}
+
+// parseSnowflakeTimestamp converts a Snowflake SQL API timestamp string to a
+// human-readable UTC time. The SQL API returns TIMESTAMP columns as Unix epoch
+// seconds with a fractional part (e.g. "1771595930.421000000").
+func parseSnowflakeTimestamp(raw string) string {
+	f, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return raw // not a numeric epoch — return as-is
+	}
+	sec := int64(f)
+	nsec := int64((f - float64(sec)) * 1e9)
+	return time.Unix(sec, nsec).UTC().Format("2006-01-02 15:04:05.000 UTC")
+}
+
+// escapeSQLString escapes single quotes in a string for use in SQL string literals.
+func escapeSQLString(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
+// FeedbackRecord holds a single CORTEX_AGENT_FEEDBACK observability event.
+type FeedbackRecord struct {
+	Timestamp  string   `json:"timestamp"`
+	AgentName  string   `json:"agent_name"`
+	UserName   string   `json:"user_name"`
+	Sentiment  string   `json:"sentiment"` // "positive", "negative", "unknown"
+	Comment    string   `json:"comment"`
+	Categories []string `json:"categories,omitempty"`
+	Question   string   `json:"question,omitempty"`  // user's question from the associated REQUEST event
+	Response   string   `json:"response,omitempty"`  // agent's response from the associated REQUEST event
+	RawRecord  string   `json:"raw_record"` // VALUE column raw JSON (fallback display)
+}
+
+// GetFeedback queries SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS for
+// CORTEX_AGENT_FEEDBACK events and returns them ordered by timestamp descending.
+// It LEFT JOINs the REQUEST events on ai.observability.record_id to include the
+// user's question and the agent's response alongside each feedback record.
+func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName string) ([]FeedbackRecord, error) {
+	dbEsc := escapeSQLString(unquoteIdentifier(db))
+	schemaEsc := escapeSQLString(unquoteIdentifier(schema))
+	agentEsc := escapeSQLString(agentName)
+
+	stmt := fmt.Sprintf(
+		"SELECT"+
+			" f.TIMESTAMP,"+
+			" f.RESOURCE_ATTRIBUTES,"+
+			" f.RECORD_ATTRIBUTES AS FEEDBACK_ATTRS,"+
+			" f.VALUE             AS FEEDBACK_VALUE,"+
+			" r.VALUE             AS REQUEST_VALUE"+
+			" FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS('%s', '%s', '%s', 'CORTEX AGENT')) f"+
+			" LEFT JOIN TABLE(SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS('%s', '%s', '%s', 'CORTEX AGENT')) r"+
+			"   ON  f.RECORD_ATTRIBUTES['ai.observability.record_id']"+
+			"     = r.RECORD_ATTRIBUTES['ai.observability.record_id']"+
+			"   AND r.RECORD:name = 'CORTEX_AGENT_REQUEST'"+
+			" WHERE f.RECORD:name = 'CORTEX_AGENT_FEEDBACK'"+
+			" ORDER BY f.TIMESTAMP DESC",
+		dbEsc, schemaEsc, agentEsc,
+		dbEsc, schemaEsc, agentEsc,
+	)
+
+	payload := sqlStatementRequest{
+		Statement: stmt,
+		Database:  unquoteIdentifier(db),
+		Schema:    unquoteIdentifier(schema),
+	}
+	if strings.TrimSpace(c.authCfg.Warehouse) != "" {
+		payload.Warehouse = c.authCfg.Warehouse
+	}
+	if strings.TrimSpace(c.role) != "" {
+		payload.Role = c.role
+	}
+
+	var resp sqlStatementResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.sqlURL(), payload, &resp); err != nil {
+		return nil, err
+	}
+
+	colIndex := make(map[string]int)
+	for i, col := range resp.ResultSetMetaData.RowType {
+		colIndex[strings.ToLower(col.Name)] = i
+	}
+
+	var records []FeedbackRecord
+	for _, row := range resp.Data {
+		rec := FeedbackRecord{AgentName: agentName, Sentiment: "unknown"}
+
+		if idx, ok := colIndex["timestamp"]; ok && idx < len(row) {
+			if raw, ok := row[idx].(string); ok {
+				rec.Timestamp = parseSnowflakeTimestamp(raw)
+			}
+		}
+
+		// FEEDBACK_VALUE column contains the actual feedback payload:
+		// {"positive": bool, "feedback_message": string, "categories": [...], "entity_type": string}
+		if idx, ok := colIndex["feedback_value"]; ok && idx < len(row) {
+			if valJSON, ok := row[idx].(string); ok && valJSON != "" {
+				rec.RawRecord = valJSON
+				var valMap map[string]any
+				if err := json.Unmarshal([]byte(valJSON), &valMap); err == nil {
+					if pos, ok := valMap["positive"].(bool); ok {
+						if pos {
+							rec.Sentiment = "positive"
+						} else {
+							rec.Sentiment = "negative"
+						}
+					}
+					if msg, ok := valMap["feedback_message"].(string); ok {
+						rec.Comment = msg
+					}
+					if cats, ok := valMap["categories"].([]any); ok {
+						for _, c := range cats {
+							if s, ok := c.(string); ok {
+								rec.Categories = append(rec.Categories, s)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// FEEDBACK_ATTRS contains agent and user identity fields.
+		if idx, ok := colIndex["feedback_attrs"]; ok && idx < len(row) {
+			if attrJSON, ok := row[idx].(string); ok && attrJSON != "" {
+				var attrs map[string]any
+				if err := json.Unmarshal([]byte(attrJSON), &attrs); err == nil {
+					if name, ok := attrs["snow.ai.observability.object.name"].(string); ok && name != "" {
+						rec.AgentName = name
+					}
+					if user, ok := attrs["snow.ai.observability.user.name"].(string); ok && user != "" {
+						rec.UserName = user
+					}
+				}
+			}
+		}
+
+		// Fallback: user name from RESOURCE_ATTRIBUTES.
+		if rec.UserName == "" {
+			if idx, ok := colIndex["resource_attributes"]; ok && idx < len(row) {
+				if attrJSON, ok := row[idx].(string); ok && attrJSON != "" {
+					var attrs map[string]any
+					if err := json.Unmarshal([]byte(attrJSON), &attrs); err == nil {
+						if user, ok := attrs["snow.user.name"].(string); ok && user != "" {
+							rec.UserName = user
+						}
+					}
+				}
+			}
+		}
+
+		// REQUEST_VALUE comes from the LEFT JOIN on CORTEX_AGENT_REQUEST events.
+		// It is null when no matching REQUEST event exists.
+		if idx, ok := colIndex["request_value"]; ok && idx < len(row) {
+			if reqJSON, ok := row[idx].(string); ok && reqJSON != "" {
+				rec.Question = extractQuestion(reqJSON)
+				rec.Response = extractResponse(reqJSON)
+			}
+		}
+
+		records = append(records, rec)
+	}
+
+	return records, nil
+}
+
+// extractQuestion extracts the last user message text from a CORTEX_AGENT_REQUEST VALUE JSON.
+// The VALUE has the shape:
+//
+//	{"snow.ai.observability.request_body": {"messages": [{"role": "user", "content": [{"type": "text", "text": "..."}]}]}}
+func extractQuestion(requestJSON string) string {
+	var valMap map[string]any
+	if err := json.Unmarshal([]byte(requestJSON), &valMap); err != nil {
+		return ""
+	}
+	reqBody, ok := valMap["snow.ai.observability.request_body"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	messages, ok := reqBody["messages"].([]any)
+	if !ok {
+		return ""
+	}
+	// Find the last message with role == "user"
+	var lastUserMsg map[string]any
+	for _, msg := range messages {
+		m, ok := msg.(map[string]any)
+		if !ok {
+			continue
+		}
+		if role, ok := m["role"].(string); ok && role == "user" {
+			lastUserMsg = m
+		}
+	}
+	if lastUserMsg == nil {
+		return ""
+	}
+	contents, ok := lastUserMsg["content"].([]any)
+	if !ok {
+		return ""
+	}
+	var parts []string
+	for _, c := range contents {
+		cm, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, ok := cm["type"].(string); ok && t == "text" {
+			if text, ok := cm["text"].(string); ok {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+// extractResponse extracts the assistant's text response from a CORTEX_AGENT_REQUEST VALUE JSON.
+// The VALUE has the shape:
+//
+//	{"snow.ai.observability.response": "{\"content\":[{\"type\":\"text\",\"text\":\"...\"}],\"role\":\"assistant\"}"}
+//
+// The response field is a nested JSON string that must be unmarshalled a second time.
+// Only content entries with type == "text" are included; tool_use / tool_result entries are skipped.
+func extractResponse(requestJSON string) string {
+	var valMap map[string]any
+	if err := json.Unmarshal([]byte(requestJSON), &valMap); err != nil {
+		return ""
+	}
+	responseRaw, ok := valMap["snow.ai.observability.response"].(string)
+	if !ok || responseRaw == "" {
+		return ""
+	}
+	var responseMap map[string]any
+	if err := json.Unmarshal([]byte(responseRaw), &responseMap); err != nil {
+		return ""
+	}
+	contents, ok := responseMap["content"].([]any)
+	if !ok {
+		return ""
+	}
+	var parts []string
+	for _, c := range contents {
+		cm, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, ok := cm["type"].(string); ok && t == "text" {
+			if text, ok := cm["text"].(string); ok {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+// probeSentiment inspects a RECORD map for sentiment signals,
+// checking the "attributes" sub-map first and then the top level.
+func probeSentiment(rec map[string]any) string {
+	if attrs, ok := rec["attributes"].(map[string]any); ok {
+		if s := probeString(attrs, []string{"sentiment", "feedback_type", "rating", "thumbs_up"}); s != "" {
+			return classifySentiment(s)
+		}
+	}
+	if s := probeString(rec, []string{"sentiment", "feedback_type", "rating", "thumbs_up"}); s != "" {
+		return classifySentiment(s)
+	}
+	return "unknown"
+}
+
+// classifySentiment maps a raw string value to "positive", "negative", or "unknown".
+func classifySentiment(s string) string {
+	lower := strings.ToLower(s)
+	switch {
+	case strings.Contains(lower, "neg"), lower == "false", lower == "0", lower == "thumbsdown", strings.Contains(lower, "bad"):
+		return "negative"
+	case strings.Contains(lower, "pos"), lower == "true", lower == "1", lower == "thumbsup", strings.Contains(lower, "good"):
+		return "positive"
+	}
+	return "unknown"
+}
+
+// probeStringNested checks the "attributes" sub-map first, then the top level.
+func probeStringNested(rec map[string]any, keys []string) string {
+	if attrs, ok := rec["attributes"].(map[string]any); ok {
+		if s := probeString(attrs, keys); s != "" {
+			return s
+		}
+	}
+	return probeString(rec, keys)
+}
+
+// probeString looks for one of the candidate keys (case-insensitive) in a map
+// and returns the first string value found.
+func probeString(m map[string]any, keys []string) string {
+	for _, k := range keys {
+		for mk, mv := range m {
+			if strings.EqualFold(mk, k) {
+				if s, ok := mv.(string); ok {
+					return s
+				}
+				if mv != nil {
+					return fmt.Sprintf("%v", mv)
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // CortexComplete calls SNOWFLAKE.CORTEX.COMPLETE via the SQL API and returns the

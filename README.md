@@ -14,6 +14,7 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 - Run agents with streaming response and multi-turn conversation support
 - Evaluate agent accuracy with test cases defined in YAML
 - LLM-as-a-Judge response scoring via Snowflake CORTEX.COMPLETE
+- View user feedback from observability data (negative/all, JSON output)
 - Variable substitution (`vars` and `env`) for environment-specific configuration
 - Recursive directory scanning for multi-agent projects
 - Key Pair (RSA JWT) authentication
@@ -270,6 +271,7 @@ coragent logout --all                  # logout from all accounts
 | `coragent export <agent-name>` | Export existing agent to YAML |
 | `coragent run [agent-name]` | Run an agent with streaming response (interactive selection if omitted) |
 | `coragent eval [path]` | Evaluate agent accuracy using test cases (default: `.`) |
+| `coragent feedback <agent-name>` | Show user feedback from observability data |
 | `coragent threads` | Manage conversation threads |
 | `coragent login` | Authenticate with Snowflake using OAuth |
 | `coragent logout` | Remove stored OAuth tokens |
@@ -489,6 +491,39 @@ coragent threads                   # interactive mode (list, select, delete)
 coragent threads --list            # list all threads (non-interactive)
 coragent threads --delete 29864464   # delete a specific thread by ID
 ```
+
+## Feedback
+
+Retrieve user feedback events for a Cortex Agent from `SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS`.
+Events with `RECORD:name = 'CORTEX_AGENT_FEEDBACK'` are fetched and displayed, ordered by timestamp descending.
+
+By default, only negative feedback is shown. Use `--all` to show all feedback.
+
+```bash
+# Show negative feedback (default)
+coragent feedback my-agent -d MY_DB -s MY_SCHEMA
+
+# Show all feedback
+coragent feedback my-agent --all
+
+# Limit results
+coragent feedback my-agent --limit 20
+
+# JSON output
+coragent feedback my-agent --json | jq .
+```
+
+### Feedback Flags
+
+| Flag | Description |
+|------|-------------|
+| `--all` | Show all feedback (default: negative only) |
+| `--limit int` | Maximum number of records to show (default: 50, 0 = unlimited) |
+| `--json` | Output as JSON array |
+
+### Requirements
+
+The role used must have access to `SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS`. See [Snowflake Cortex Agents Monitoring](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-monitor) for setup details.
 
 ## YAML Spec Reference
 
