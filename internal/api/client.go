@@ -1021,6 +1021,7 @@ func escapeSQLString(s string) string {
 
 // FeedbackRecord holds a single CORTEX_AGENT_FEEDBACK observability event.
 type FeedbackRecord struct {
+	RecordID   string   `json:"record_id"`            // RECORD_ATTRIBUTES['ai.observability.record_id']
 	Timestamp  string   `json:"timestamp"`
 	AgentName  string   `json:"agent_name"`
 	UserName   string   `json:"user_name"`
@@ -1047,7 +1048,8 @@ func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName string) 
 			" f.RESOURCE_ATTRIBUTES,"+
 			" f.RECORD_ATTRIBUTES AS FEEDBACK_ATTRS,"+
 			" f.VALUE             AS FEEDBACK_VALUE,"+
-			" r.VALUE             AS REQUEST_VALUE"+
+			" r.VALUE             AS REQUEST_VALUE,"+
+			" f.RECORD_ATTRIBUTES['ai.observability.record_id'] AS RECORD_ID"+
 			" FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS('%s', '%s', '%s', 'CORTEX AGENT')) f"+
 			" LEFT JOIN TABLE(SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS('%s', '%s', '%s', 'CORTEX AGENT')) r"+
 			"   ON  f.RECORD_ATTRIBUTES['ai.observability.record_id']"+
@@ -1154,6 +1156,13 @@ func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName string) 
 			if reqJSON, ok := row[idx].(string); ok && reqJSON != "" {
 				rec.Question = extractQuestion(reqJSON)
 				rec.Response = extractResponse(reqJSON)
+			}
+		}
+
+		// RECORD_ID is the stable Snowflake-issued UUID for this feedback event.
+		if idx, ok := colIndex["record_id"]; ok && idx < len(row) {
+			if rid, ok := row[idx].(string); ok {
+				rec.RecordID = strings.Trim(rid, `"`)
 			}
 		}
 

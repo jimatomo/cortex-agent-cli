@@ -497,19 +497,27 @@ coragent threads --delete 29864464   # delete a specific thread by ID
 Retrieve user feedback events for a Cortex Agent from `SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS`.
 Events with `RECORD:name = 'CORTEX_AGENT_FEEDBACK'` are fetched and displayed, ordered by timestamp descending.
 
+Records are cached locally at `~/.coragent/feedback/<agent-name>.json`. Records are shown **one at a time** and after each one you are prompted to mark it as **checked**; checked records are hidden on subsequent runs, letting you work through feedback incrementally. Progress is saved after each confirmation, so you can quit mid-way and resume later.
+
 By default, only negative feedback is shown. Use `--all` to show all feedback.
 
 ```bash
-# Show negative feedback (default)
+# Show negative (unchecked) feedback
 coragent feedback my-agent -d MY_DB -s MY_SCHEMA
 
-# Show all feedback
+# Show all feedback (all sentiments)
 coragent feedback my-agent --all
+
+# Auto-confirm marking shown records as checked
+coragent feedback my-agent -y
+
+# Also show already-checked records (displayed with [✓])
+coragent feedback my-agent --include-checked
 
 # Limit results
 coragent feedback my-agent --limit 20
 
-# JSON output
+# JSON output (no check prompt)
 coragent feedback my-agent --json | jq .
 ```
 
@@ -519,7 +527,9 @@ coragent feedback my-agent --json | jq .
 |------|-------------|
 | `--all` | Show all feedback (default: negative only) |
 | `--limit int` | Maximum number of records to show (default: 50, 0 = unlimited) |
-| `--json` | Output as JSON array |
+| `--json` | Output as JSON array (skips check prompt) |
+| `-y`, `--yes` | Auto-confirm marking each record as checked |
+| `--include-checked` | Also show already-checked records (marked with `[✓]`) |
 
 ### Requirements
 
