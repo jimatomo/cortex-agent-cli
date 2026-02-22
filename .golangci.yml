@@ -1,0 +1,29 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - godot
+
+linters-settings:
+  godot:
+    # Require comments to end with a period.
+    scope: declarations
+    exclude:
+      # Exclude lines that start a list or contain code examples.
+      - "^\\s*-"
+      - "TODO"
+      - "NOTE"
+
+issues:
+  exclude-rules:
+    # Integration test files use t.Log which doesn't need godot.
+    - path: "_integration_test\\.go"
+      linters:
+        - godot
+    # Test helpers and test files are exempted from errcheck (e.g. t.Cleanup).
+    - path: "_test\\.go"
+      linters:
+        - errcheck
