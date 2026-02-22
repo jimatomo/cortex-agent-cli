@@ -36,17 +36,15 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
-brews:
+homebrew_casks:
   - name: coragent
     repository:
       owner: jimatomo
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
+    directory: Casks
     homepage: "https://github.com/jimatomo/cortex-agent-cli"
     description: "CLI tool for managing Snowflake Cortex Agent deployments"
-    install: |
-      bin.install "coragent"
-    test: |
-      system "#{bin}/coragent", "--help"
+    binaries:
+      - coragent
 
