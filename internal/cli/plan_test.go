@@ -131,7 +131,7 @@ func TestPlanToGrantRows(t *testing.T) {
 		{Privilege: "USAGE", GrantedTo: "ROLE", GranteeName: "ANALYST"},
 		{Privilege: "OPERATE", GrantedTo: "DATABASE_ROLE", GranteeName: "DB.RUNNER"},
 	}
-	got := planToGrantRows(input)
+	got := convertGrantRows(input)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 rows, got %d", len(got))
 	}
@@ -144,7 +144,7 @@ func TestPlanToGrantRows(t *testing.T) {
 }
 
 func TestPlanToGrantRows_Empty(t *testing.T) {
-	got := planToGrantRows(nil)
+	got := convertGrantRows(nil)
 	if len(got) != 0 {
 		t.Errorf("expected 0 rows, got %d", len(got))
 	}
@@ -155,7 +155,7 @@ func TestPlanToGrantRows_TypeConversion(t *testing.T) {
 	input := []api.ShowGrantsRow{
 		{Privilege: "USAGE", GrantedTo: "ROLE", GranteeName: "R1"},
 	}
-	result := planToGrantRows(input)
+	result := convertGrantRows(input)
 	var _ []grant.ShowGrantsRow = result // compile-time type check
 	if result[0].Privilege != "USAGE" {
 		t.Errorf("unexpected Privilege: %q", result[0].Privilege)

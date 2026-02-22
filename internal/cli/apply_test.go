@@ -159,7 +159,7 @@ func TestToGrantRows(t *testing.T) {
 		{Privilege: "USAGE", GrantedTo: "ROLE", GranteeName: "ANALYST"},
 		{Privilege: "OPERATE", GrantedTo: "DATABASE_ROLE", GranteeName: "DB.RUNNER"},
 	}
-	got := toGrantRows(input)
+	got := convertGrantRows(input)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 rows, got %d", len(got))
 	}
@@ -173,7 +173,7 @@ func TestToGrantRows(t *testing.T) {
 }
 
 func TestToGrantRows_Empty(t *testing.T) {
-	got := toGrantRows(nil)
+	got := convertGrantRows(nil)
 	if len(got) != 0 {
 		t.Errorf("expected 0 rows, got %d", len(got))
 	}
