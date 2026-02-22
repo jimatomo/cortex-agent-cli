@@ -23,6 +23,7 @@ func newFeedbackCmd(opts *RootOptions) *cobra.Command {
 	var yes bool
 	var includeChecked bool
 	var noTools bool
+	var clearCache bool
 
 	cmd := &cobra.Command{
 		Use:   "feedback <agent-name>",
@@ -52,6 +53,22 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentName := args[0]
+
+			if clearCache {
+				path, err := feedbackCachePath(agentName)
+				if err != nil {
+					return err
+				}
+				if err := os.Remove(path); err != nil {
+					if os.IsNotExist(err) {
+						fmt.Fprintf(cmd.OutOrStdout(), "No cache found for agent %q.\n", agentName)
+						return nil
+					}
+					return fmt.Errorf("remove cache: %w", err)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Feedback cache cleared for agent %q.\n", agentName)
+				return nil
+			}
 
 			cfg := auth.LoadConfig(opts.Connection)
 			applyAuthOverrides(&cfg, opts)
@@ -198,6 +215,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Auto-confirm marking each record as checked")
 	cmd.Flags().BoolVar(&includeChecked, "include-checked", false, "Also show already-checked records")
 	cmd.Flags().BoolVar(&noTools, "no-tools", false, "Hide tool invocation details (Query, SQL, RespTime)")
+	cmd.Flags().BoolVar(&clearCache, "clear", false, "Delete the local feedback cache for the agent and exit")
 
 	return cmd
 }
