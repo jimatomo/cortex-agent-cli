@@ -146,7 +146,7 @@ Large files are hard to read and review:
 
 - [x] Add `.golangci.yml` with a baseline ruleset (`errcheck`, `govet`, `staticcheck`, `godot` for comments)
 - [x] Add linter step to CI
-- [ ] Fix existing lint warnings before v1.0
+- [x] Fix existing lint warnings before v1.0
 
 ---
 

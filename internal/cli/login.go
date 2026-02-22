@@ -73,7 +73,7 @@ func runLogin(ctx context.Context, rootOpts *RootOptions, opts *loginOptions) er
 	if err := server.Start(); err != nil {
 		return fmt.Errorf("start callback server: %w", err)
 	}
-	defer server.Stop()
+	defer func() { _ = server.Stop() }()
 
 	// Generate state for CSRF protection
 	state, err := auth.GenerateState()

@@ -455,20 +455,6 @@ func extractResponseTimeMs(requestJSON string) int64 {
 	return 0
 }
 
-// probeSentiment inspects a RECORD map for sentiment signals,
-// checking the "attributes" sub-map first and then the top level.
-func probeSentiment(rec map[string]any) string {
-	if attrs, ok := rec["attributes"].(map[string]any); ok {
-		if s := probeString(attrs, []string{"sentiment", "feedback_type", "rating", "thumbs_up"}); s != "" {
-			return classifySentiment(s)
-		}
-	}
-	if s := probeString(rec, []string{"sentiment", "feedback_type", "rating", "thumbs_up"}); s != "" {
-		return classifySentiment(s)
-	}
-	return "unknown"
-}
-
 // classifySentiment maps a raw string value to "positive", "negative", or "unknown".
 func classifySentiment(s string) string {
 	lower := strings.ToLower(s)
@@ -479,16 +465,6 @@ func classifySentiment(s string) string {
 		return "positive"
 	}
 	return "unknown"
-}
-
-// probeStringNested checks the "attributes" sub-map first, then the top level.
-func probeStringNested(rec map[string]any, keys []string) string {
-	if attrs, ok := rec["attributes"].(map[string]any); ok {
-		if s := probeString(attrs, keys); s != "" {
-			return s
-		}
-	}
-	return probeString(rec, keys)
 }
 
 // probeString looks for one of the candidate keys (case-insensitive) in a map

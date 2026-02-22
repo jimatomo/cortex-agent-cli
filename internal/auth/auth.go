@@ -186,11 +186,11 @@ func parsePrivateKey(data []byte, passphrase string) (*rsa.PrivateKey, *rsa.Publ
 	}
 
 	var privKey *rsa.PrivateKey
-	if x509.IsEncryptedPEMBlock(block) {
+	if x509.IsEncryptedPEMBlock(block) { //nolint:staticcheck // Legacy PEM encryption needed for Snowflake key compatibility.
 		if strings.TrimSpace(passphrase) == "" {
 			return nil, nil, fmt.Errorf("private key is encrypted but no passphrase was provided (set SNOWFLAKE_PRIVATE_KEY_PASSPHRASE)")
 		}
-		der, err := x509.DecryptPEMBlock(block, []byte(passphrase))
+		der, err := x509.DecryptPEMBlock(block, []byte(passphrase)) //nolint:staticcheck
 		if err != nil {
 			return nil, nil, fmt.Errorf("decrypt private key: %w", err)
 		}
@@ -261,24 +261,6 @@ func publicKeyFingerprint(pub *rsa.PublicKey) (string, error) {
 	}
 	sum := sha256.Sum256(der)
 	return base64.StdEncoding.EncodeToString(sum[:]), nil
-}
-
-func isSimpleIdentifier(s string) bool {
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z':
-			continue
-		case r >= 'A' && r <= 'Z':
-			continue
-		case r >= '0' && r <= '9':
-			continue
-		case r == '_' || r == '$':
-			continue
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 func envOrDefault(key, fallback string) string {

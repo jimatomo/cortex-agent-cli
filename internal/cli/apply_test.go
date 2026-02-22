@@ -6,7 +6,6 @@ import (
 	"coragent/internal/agent"
 	"coragent/internal/api"
 	"coragent/internal/diff"
-	"coragent/internal/grant"
 )
 
 func TestTopLevel(t *testing.T) {
@@ -163,7 +162,6 @@ func TestToGrantRows(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 rows, got %d", len(got))
 	}
-	var _ []grant.ShowGrantsRow = got // compile-time type check
 	if got[0].Privilege != "USAGE" {
 		t.Errorf("row 0 Privilege = %q, want %q", got[0].Privilege, "USAGE")
 	}

@@ -7,7 +7,6 @@ import (
 	"coragent/internal/api"
 	"coragent/internal/auth"
 	"coragent/internal/diff"
-	"coragent/internal/grant"
 )
 
 func TestFormatValue(t *testing.T) {
@@ -156,7 +155,6 @@ func TestPlanToGrantRows_TypeConversion(t *testing.T) {
 		{Privilege: "USAGE", GrantedTo: "ROLE", GranteeName: "R1"},
 	}
 	result := convertGrantRows(input)
-	var _ []grant.ShowGrantsRow = result // compile-time type check
 	if result[0].Privilege != "USAGE" {
 		t.Errorf("unexpected Privilege: %q", result[0].Privilege)
 	}

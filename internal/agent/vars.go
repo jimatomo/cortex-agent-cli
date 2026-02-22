@@ -9,7 +9,7 @@ import (
 )
 
 // VarsConfig maps environment names to variable key-value pairs.
-// Example: {"dev": {"DB": "DEV_DB"}, "default": {"DB": "MY_DB"}}
+// Example: {"dev": {"DB": "DEV_DB"}, "default": {"DB": "MY_DB"}}.
 type VarsConfig map[string]map[string]string
 
 // varsWrapper is used in the first pass to extract only the vars section.

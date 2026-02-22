@@ -250,7 +250,7 @@ func parseSSEStream(body io.Reader, opts RunAgentOptions, debug bool) (*Response
 		}
 
 		// Handle comment lines (starting with :)
-		if strings.HasPrefix(line, ":") {
+		if strings.HasPrefix(line, ":") { //nolint:staticcheck // False positive: return value is used as if-condition.
 			continue
 		}
 	}

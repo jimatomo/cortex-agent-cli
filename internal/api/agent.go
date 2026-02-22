@@ -95,19 +95,6 @@ func (c *Client) ListAgents(ctx context.Context, db, schema string) ([]AgentList
 	return out, nil
 }
 
-func (c *Client) findAgentListEntry(ctx context.Context, db, schema, name string) (*AgentListItem, error) {
-	items, err := c.ListAgents(ctx, db, schema)
-	if err != nil {
-		return nil, err
-	}
-	for i := range items {
-		if items[i].Name == name {
-			return &items[i], nil
-		}
-	}
-	return nil, nil
-}
-
 func (c *Client) describeAgentFull(ctx context.Context, db, schema, name string) (DescribeResult, error) {
 	stmt := fmt.Sprintf("DESCRIBE AGENT %s.%s.%s", identifierSegment(db), identifierSegment(schema), identifierSegment(name))
 	payload := sqlStatementRequest{
@@ -636,8 +623,8 @@ func normalizeToolsList(input []any) []any {
 }
 
 // normalizeToolResources converts API response format to expected format.
-// API response format: {"tool_name": [{"semantic_view": "...", ...}]} (array with single element)
-// Expected format: {"tool_name": {"semantic_view": "...", ...}} (direct object)
+// API response format: {"tool_name": [{"semantic_view": "...", ...}]} (array with single element).
+// Expected format: {"tool_name": {"semantic_view": "...", ...}} (direct object).
 func normalizeToolResources(input map[string]any) map[string]any {
 	out := make(map[string]any, len(input))
 

@@ -140,12 +140,7 @@ func (c *SnowflakeConnection) ToAuthConfig() (Config, error) {
 		cfg.PrivateKey = c.PrivateKeyRaw
 	}
 
-	// OAuth defaults
-	if cfg.Authenticator == AuthenticatorOAuth {
-		if c.OAuthClientID != "" || c.OAuthClientSecret != "" {
-			// store in config for later use; the OAuthConfig is built at login/token time
-		}
-	}
+	// OAuth credentials are stored in the connection config and used at login/token time.
 
 	if cfg.OAuthRedirectURI == "" {
 		cfg.OAuthRedirectURI = DefaultOAuthRedirectURI

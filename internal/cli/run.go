@@ -265,7 +265,7 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
 					LastUsed:      time.Now(),
 					Summary:       truncateSummary(message),
 				})
-				state.Save()
+				_ = state.Save()
 			}
 
 			return err

@@ -53,7 +53,7 @@ func readLine(prompt string) (string, error) {
 	if err != nil {
 		return readLineFallback(prompt)
 	}
-	defer term.Restore(fd, oldState)
+	defer func() { _ = term.Restore(fd, oldState) }()
 
 	fmt.Fprint(os.Stderr, prompt)
 
