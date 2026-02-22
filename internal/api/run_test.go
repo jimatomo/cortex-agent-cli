@@ -2,9 +2,14 @@ package api
 
 import (
 	"encoding/json"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 )
+
+// noopLog is a discard logger for use in tests.
+var noopLog = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func TestParseSSEStream_TextDelta(t *testing.T) {
 	body := "event: response.text.delta\ndata: {\"text\":\"hello\",\"content_index\":0,\"sequence_number\":1}\n\n"
@@ -14,7 +19,7 @@ func TestParseSSEStream_TextDelta(t *testing.T) {
 			received += delta
 		},
 	}
-	_, err := parseSSEStream(strings.NewReader(body), opts, false)
+	_, err := parseSSEStream(strings.NewReader(body), opts, noopLog)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -31,7 +36,7 @@ func TestParseSSEStream_ThinkingDelta(t *testing.T) {
 			received += delta
 		},
 	}
-	_, err := parseSSEStream(strings.NewReader(body), opts, false)
+	_, err := parseSSEStream(strings.NewReader(body), opts, noopLog)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,7 +55,7 @@ func TestParseSSEStream_ToolUse(t *testing.T) {
 			toolInput = input
 		},
 	}
-	_, err := parseSSEStream(strings.NewReader(body), opts, false)
+	_, err := parseSSEStream(strings.NewReader(body), opts, noopLog)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -70,7 +75,7 @@ func TestParseSSEStream_ToolResult(t *testing.T) {
 			resultName = name
 		},
 	}
-	_, err := parseSSEStream(strings.NewReader(body), opts, false)
+	_, err := parseSSEStream(strings.NewReader(body), opts, noopLog)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,7 +87,7 @@ func TestParseSSEStream_ToolResult(t *testing.T) {
 func TestParseSSEStream_Error(t *testing.T) {
 	body := "event: error\ndata: {\"message\":\"something failed\",\"code\":\"ERR01\"}\n\n"
 	opts := RunAgentOptions{}
-	_, err := parseSSEStream(strings.NewReader(body), opts, false)
+	_, err := parseSSEStream(strings.NewReader(body), opts, noopLog)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -104,7 +109,7 @@ func TestParseSSEStream_Metadata(t *testing.T) {
 			mid = messageID
 		},
 	}
-	_, err := parseSSEStream(strings.NewReader(body), opts, false)
+	_, err := parseSSEStream(strings.NewReader(body), opts, noopLog)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,7 +131,7 @@ func TestParseSSEStream_Response(t *testing.T) {
 			metaMID = messageID
 		},
 	}
-	resp, err := parseSSEStream(strings.NewReader(body), opts, false)
+	resp, err := parseSSEStream(strings.NewReader(body), opts, noopLog)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -153,7 +158,7 @@ func TestParseSSEStream_Status(t *testing.T) {
 			gotMessage = message
 		},
 	}
-	_, err := parseSSEStream(strings.NewReader(body), opts, false)
+	_, err := parseSSEStream(strings.NewReader(body), opts, noopLog)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -174,7 +179,7 @@ func TestParseSSEStream_MultipleEvents(t *testing.T) {
 			received += delta
 		},
 	}
-	_, err := parseSSEStream(strings.NewReader(body), opts, false)
+	_, err := parseSSEStream(strings.NewReader(body), opts, noopLog)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -191,7 +196,7 @@ func TestParseSSEStream_Comments(t *testing.T) {
 			received += delta
 		},
 	}
-	_, err := parseSSEStream(strings.NewReader(body), opts, false)
+	_, err := parseSSEStream(strings.NewReader(body), opts, noopLog)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -208,7 +213,7 @@ func TestParseSSEStream_NilCallbacks(t *testing.T) {
 		"event: response.status\ndata: {\"status\":\"done\",\"message\":\"ok\",\"sequence_number\":1}\n\n" +
 		"event: metadata\ndata: {\"metadata\":{\"thread_id\":\"t1\",\"message_id\":1,\"role\":\"assistant\"}}\n\n"
 	opts := RunAgentOptions{} // all callbacks nil
-	_, err := parseSSEStream(strings.NewReader(body), opts, false)
+	_, err := parseSSEStream(strings.NewReader(body), opts, noopLog)
 	if err != nil {
 		t.Fatalf("should not panic or error with nil callbacks: %v", err)
 	}
@@ -216,7 +221,7 @@ func TestParseSSEStream_NilCallbacks(t *testing.T) {
 
 func TestParseSSEStream_EmptyBody(t *testing.T) {
 	opts := RunAgentOptions{}
-	resp, err := parseSSEStream(strings.NewReader(""), opts, false)
+	resp, err := parseSSEStream(strings.NewReader(""), opts, noopLog)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

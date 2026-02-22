@@ -2,6 +2,8 @@ package api
 
 import (
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,7 +20,7 @@ type Client struct {
 	userAgent string
 	http      *http.Client
 	authCfg   auth.Config
-	debug     bool
+	log       *slog.Logger
 }
 
 // APIError represents a non-2xx HTTP response from the Snowflake API.
@@ -58,6 +60,11 @@ func isNotFoundError(err error) bool {
 	return false
 }
 
+// discardLogger returns a slog.Logger that discards all output.
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
 // NewClient constructs a Client using the given auth configuration.
 func NewClient(cfg auth.Config) (*Client, error) {
 	return NewClientWithDebug(cfg, false)
@@ -71,10 +78,12 @@ func NewClientForTest(base *url.URL, cfg auth.Config) *Client {
 		userAgent: "test",
 		http:      &http.Client{Timeout: 30 * time.Second},
 		authCfg:   cfg,
+		log:       discardLogger(),
 	}
 }
 
 // NewClientWithDebug constructs a Client with optional debug logging enabled.
+// If debug is true, HTTP requests and responses are logged to stderr.
 // If the environment variable CORAGENT_API_BASE_URL is set, it overrides the
 // computed Snowflake endpoint — useful for testing against a mock HTTP server.
 func NewClientWithDebug(cfg auth.Config, debug bool) (*Client, error) {
@@ -90,13 +99,20 @@ func NewClientWithDebug(cfg auth.Config, debug bool) (*Client, error) {
 		return nil, fmt.Errorf("parse base url: %w", err)
 	}
 
+	var log *slog.Logger
+	if debug {
+		log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	} else {
+		log = discardLogger()
+	}
+
 	client := &Client{
 		baseURL:   base,
 		role:      strings.ToUpper(strings.TrimSpace(cfg.Role)),
 		userAgent: "coragent",
 		http:      &http.Client{Timeout: 60 * time.Second},
 		authCfg:   cfg,
-		debug:     debug,
+		log:       log,
 	}
 
 	return client, nil

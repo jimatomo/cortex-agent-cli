@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 
 	"coragent/internal/auth"
@@ -52,14 +52,15 @@ func (c *Client) doJSON(ctx context.Context, method, urlStr string, payload any,
 	}
 	defer resp.Body.Close()
 
-	if c.debug {
+	// When debug logging is enabled, buffer the response body so we can log it.
+	if c.log.Enabled(ctx, slog.LevelDebug) {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		c.debugf("HTTP %s %s -> %d", method, urlStr, resp.StatusCode)
+		c.log.Debug("http", "method", method, "url", urlStr, "status", resp.StatusCode)
 		if len(reqBody) > 0 {
-			c.debugf("request body: %s", truncateDebug(reqBody))
+			c.log.Debug("request body", "body", truncateDebug(reqBody))
 		}
 		if len(bodyBytes) > 0 {
-			c.debugf("response body: %s", truncateDebug(bodyBytes))
+			c.log.Debug("response body", "body", truncateDebug(bodyBytes))
 		}
 		if resp.StatusCode >= 300 {
 			return APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
@@ -84,13 +85,6 @@ func (c *Client) doJSON(ctx context.Context, method, urlStr string, payload any,
 	}
 
 	return nil
-}
-
-func (c *Client) debugf(format string, args ...any) {
-	if !c.debug {
-		return
-	}
-	fmt.Fprintf(os.Stderr, "DEBUG: "+format+"\n", args...)
 }
 
 func truncateDebug(data []byte) string {

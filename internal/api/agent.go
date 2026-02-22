@@ -127,9 +127,9 @@ func (c *Client) describeAgentFull(ctx context.Context, db, schema, name string)
 		}
 	}
 
-	c.debugf("DESCRIBE AGENT raw columns: %v", mapKeys(raw))
+	c.log.Debug("DESCRIBE AGENT raw columns", "columns", mapKeys(raw))
 	if specJSON, ok := raw["agent_spec"]; ok {
-		c.debugf("DESCRIBE AGENT agent_spec: %v", specJSON)
+		c.log.Debug("DESCRIBE AGENT agent_spec", "value", specJSON)
 	}
 
 	spec := agent.AgentSpec{}

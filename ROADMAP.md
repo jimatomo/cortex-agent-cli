@@ -126,9 +126,9 @@ Large files are hard to read and review:
 
 ### 3-2. Structured logging
 
-- [ ] Replace ad-hoc `fmt.Fprintf(os.Stderr, "[debug] ...")` with a `slog`-based logger
-- [ ] Pass the logger via context or dependency injection rather than global state
-- [ ] `--debug` sets log level to DEBUG; default is WARN (errors only)
+- [x] Replace ad-hoc `fmt.Fprintf(os.Stderr, "[debug] ...")` with a `slog`-based logger
+- [x] Pass the logger via context or dependency injection rather than global state
+- [x] `--debug` sets log level to DEBUG; default is WARN (errors only)
 
 ### 3-3. Add CHANGELOG
 

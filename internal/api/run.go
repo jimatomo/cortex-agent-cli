@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"path"
 	"strings"
@@ -167,8 +168,8 @@ func (c *Client) RunAgent(ctx context.Context, db, schema, name string, req RunA
 	// Use a client with longer timeout for streaming
 	httpClient := &http.Client{Timeout: 15 * time.Minute}
 
-	c.debugf("HTTP POST %s", urlStr)
-	c.debugf("request body: %s", truncateDebug(data))
+	c.log.Debug("http", "method", "POST", "url", urlStr)
+	c.log.Debug("request body", "body", truncateDebug(data))
 
 	if opts.OnProgress != nil {
 		opts.OnProgress("Sending request...")
@@ -179,7 +180,7 @@ func (c *Client) RunAgent(ctx context.Context, db, schema, name string, req RunA
 	}
 	defer resp.Body.Close()
 
-	c.debugf("response status: %d", resp.StatusCode)
+	c.log.Debug("response status", "status", resp.StatusCode)
 
 	if resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -189,7 +190,7 @@ func (c *Client) RunAgent(ctx context.Context, db, schema, name string, req RunA
 	if opts.OnProgress != nil {
 		opts.OnProgress("Waiting for response...")
 	}
-	return parseSSEStream(resp.Body, opts, c.debug)
+	return parseSSEStream(resp.Body, opts, c.log)
 }
 
 func (c *Client) agentRunURL(db, schema, name string) string {
@@ -207,7 +208,7 @@ func (c *Client) agentRunURL(db, schema, name string) string {
 }
 
 // parseSSEStream parses Server-Sent Events from the response body.
-func parseSSEStream(body io.Reader, opts RunAgentOptions, debug bool) (*ResponseEvent, error) {
+func parseSSEStream(body io.Reader, opts RunAgentOptions, log *slog.Logger) (*ResponseEvent, error) {
 	reader := bufio.NewReader(body)
 	var currentEvent string
 	var dataBuffer strings.Builder
@@ -227,7 +228,7 @@ func parseSSEStream(body io.Reader, opts RunAgentOptions, debug bool) (*Response
 		// Empty line signals end of event
 		if line == "" {
 			if currentEvent != "" && dataBuffer.Len() > 0 {
-				if err := processSSEEvent(currentEvent, dataBuffer.String(), opts, &finalResponse, debug); err != nil {
+				if err := processSSEEvent(currentEvent, dataBuffer.String(), opts, &finalResponse, log); err != nil {
 					return finalResponse, err
 				}
 			}
@@ -257,7 +258,7 @@ func parseSSEStream(body io.Reader, opts RunAgentOptions, debug bool) (*Response
 
 	// Process any remaining buffered event
 	if currentEvent != "" && dataBuffer.Len() > 0 {
-		if err := processSSEEvent(currentEvent, dataBuffer.String(), opts, &finalResponse, debug); err != nil {
+		if err := processSSEEvent(currentEvent, dataBuffer.String(), opts, &finalResponse, log); err != nil {
 			return finalResponse, err
 		}
 	}
@@ -265,10 +266,8 @@ func parseSSEStream(body io.Reader, opts RunAgentOptions, debug bool) (*Response
 	return finalResponse, nil
 }
 
-func processSSEEvent(eventType, data string, opts RunAgentOptions, finalResponse **ResponseEvent, debug bool) error {
-	if debug {
-		fmt.Printf("DEBUG: SSE event=%s data=%s\n", eventType, truncateDebug([]byte(data)))
-	}
+func processSSEEvent(eventType, data string, opts RunAgentOptions, finalResponse **ResponseEvent, log *slog.Logger) error {
+	log.Debug("sse event", "type", eventType, "data", truncateDebug([]byte(data)))
 
 	switch eventType {
 	case "response.status":

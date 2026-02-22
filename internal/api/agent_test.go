@@ -49,6 +49,7 @@ func newDescribeTestClient(t *testing.T, srv *httptest.Server) *Client {
 			User:       "TESTUSER",
 			PrivateKey: testRSAPEM(t),
 		},
+		log: discardLogger(),
 	}
 }
 
