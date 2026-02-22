@@ -69,7 +69,7 @@ The `AgentSpec` struct is the primary user-facing contract. Before v1.0:
 
 Current coverage exists but is incomplete.
 
-- [ ] Table-driven tests for `DescribeAgent` response mapping (cover all columns)
+- [x] Table-driven tests for `DescribeAgent` response mapping (cover all columns)
 - [x] Tests for grant diff computation round-trips (apply + show → no diff)
 - [x] Tests for SQL result parsing used by eval and feedback
 - [x] Mock-based tests for `RunAgent` streaming event parsing (all event types)
@@ -83,7 +83,7 @@ CLI commands currently lack fine-grained unit tests independent of a real Snowfl
 - [ ] Test `apply` command: dry-run, confirm=yes, confirm=no, eval-after-apply flag
 - [x] Test `export` command: field mapping, unmapped-field warnings
 - [x] Test `eval` command: pass/fail scoring, tool-invocation matching
-- [ ] Test `feedback` command: cache write, incremental update, `--clear` flag
+- [x] Test `feedback` command: cache write, incremental update, `--clear` flag
 
 ### 2-3. Unit tests — `internal/diff/`
 
@@ -94,7 +94,7 @@ CLI commands currently lack fine-grained unit tests independent of a real Snowfl
 
 - [x] Test JWT signing with a test RSA key
 - [x] Test `snowflake_config.go` parsing for all authenticator types
-- [ ] Test OAuth token refresh logic with a mock HTTP server
+- [x] Test OAuth token refresh logic with a mock HTTP server
 
 ### 2-5. Regression test suite
 
@@ -145,7 +145,7 @@ Large files are hard to read and review:
 ### 3-5. Linter and formatting enforcement
 
 - [x] Add `.golangci.yml` with a baseline ruleset (`errcheck`, `govet`, `staticcheck`, `godot` for comments)
-- [ ] Add linter step to CI
+- [x] Add linter step to CI
 - [ ] Fix existing lint warnings before v1.0
 
 ---
