@@ -122,7 +122,7 @@ Large files are hard to read and review:
 
 - [x] `run.go` — separate streaming I/O handling into `internal/cli/run_io.go`
 - [x] `eval.go` — separate judge logic into `internal/cli/eval_judge.go`
-- [ ] `feedback.go` + `feedback_cache.go` — move cache to `internal/feedbackcache/` package for testability
+- [x] `feedback.go` + `feedback_cache.go` — move cache to `internal/feedbackcache/` package for testability
 
 ### 3-2. Structured logging
 
@@ -134,7 +134,7 @@ Large files are hard to read and review:
 
 - [x] Create `CHANGELOG.md` using [Keep a Changelog](https://keepachangelog.com/) format
 - [x] Back-fill notable changes since the initial commit
-- [ ] Add CHANGELOG update to the release checklist
+- [x] Add CHANGELOG update to the release checklist
 
 ### 3-4. Improve public-facing documentation
 

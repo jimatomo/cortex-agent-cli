@@ -67,3 +67,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--version` flag.
 - Installation script (`install.sh`).
 - GitHub Actions CI with integration tests.
+
+---
+
+## Release Checklist
+
+Before tagging a release, complete the following steps:
+
+1. **Update CHANGELOG.md** — move all entries from `[Unreleased]` into a versioned section (e.g., `## [1.0.0] — YYYY-MM-DD`).
+2. **Bump version in goreleaser** — ensure `.goreleaser.yml` or the tag itself reflects the new version.
+3. **Run tests** — `go test -race -short ./...` must pass.
+4. **Run linter** — `golangci-lint run ./...` must report 0 issues.
+5. **Tag the commit** — `git tag vX.Y.Z && git push origin vX.Y.Z`.
+6. **Verify the release workflow** — confirm the GitHub Actions `Release` workflow completes successfully and artifacts are published.

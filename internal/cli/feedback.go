@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
-
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+
+	"coragent/internal/feedbackcache"
 )
 
 func newFeedbackCmd(opts *RootOptions) *cobra.Command {
@@ -53,7 +54,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 			agentName := args[0]
 
 			if clearCache {
-				path, err := feedbackCachePath(agentName)
+				path, err := feedbackcache.CachePath(agentName)
 				if err != nil {
 					return err
 				}
@@ -88,17 +89,17 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 			}
 
 			// 2. Load cache → merge → save.
-			cache, err := loadFeedbackCache(agentName)
+			cache, err := feedbackcache.Load(agentName)
 			if err != nil {
 				return fmt.Errorf("load feedback cache: %w", err)
 			}
-			cache.merge(fresh)
-			if err := saveFeedbackCache(agentName, cache); err != nil {
+			cache.Merge(fresh)
+			if err := feedbackcache.Save(agentName, cache); err != nil {
 				return fmt.Errorf("save feedback cache: %w", err)
 			}
 
 			// 3. Select records to display.
-			var toShow []CachedFeedbackRecord
+			var toShow []feedbackcache.Record
 			if includeChecked {
 				toShow = cache.Records
 			} else {
@@ -111,7 +112,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 
 			// 4. Apply sentiment filter (--all) and --limit.
 			if !showAll {
-				var filtered []CachedFeedbackRecord
+				var filtered []feedbackcache.Record
 				for _, r := range toShow {
 					if r.Sentiment == "negative" {
 						filtered = append(filtered, r)
@@ -185,7 +186,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 							break
 						}
 					}
-					if err := saveFeedbackCache(agentName, cache); err != nil {
+					if err := feedbackcache.Save(agentName, cache); err != nil {
 						return fmt.Errorf("save feedback cache: %w", err)
 					}
 					markedCount++
@@ -216,7 +217,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 }
 
 // printOneRecord prints a single feedback record with its index out of total.
-func printOneRecord(cmd *cobra.Command, idx, total int, r CachedFeedbackRecord, includeChecked bool, noTools bool) {
+func printOneRecord(cmd *cobra.Command, idx, total int, r feedbackcache.Record, includeChecked bool, noTools bool) {
 	checkedMark := ""
 	if includeChecked {
 		if r.Checked {

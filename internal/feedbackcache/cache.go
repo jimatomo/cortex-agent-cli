@@ -1,4 +1,6 @@
-package cli
+// Package feedbackcache manages the on-disk feedback record cache stored at
+// ~/.coragent/feedback/<agent>.json.
+package feedbackcache
 
 import (
 	"encoding/json"
@@ -10,21 +12,21 @@ import (
 	"coragent/internal/api"
 )
 
-// CachedFeedbackRecord wraps a FeedbackRecord with a checked state.
-// The record is identified by the embedded FeedbackRecord.RecordID.
-type CachedFeedbackRecord struct {
+// Record wraps a FeedbackRecord with a user-managed checked state.
+// The record is uniquely identified by the embedded FeedbackRecord.RecordID.
+type Record struct {
 	Checked bool `json:"checked"`
 	api.FeedbackRecord
 }
 
-// FeedbackCache is the on-disk structure stored at ~/.coragent/feedback/<agent>.json.
-type FeedbackCache struct {
-	Records []CachedFeedbackRecord `json:"records"`
+// Cache is the on-disk structure stored at ~/.coragent/feedback/<agent>.json.
+type Cache struct {
+	Records []Record `json:"records"`
 }
 
-// feedbackCachePath returns the path to the cache file for agentName and ensures
-// the parent directory exists.
-func feedbackCachePath(agentName string) (string, error) {
+// CachePath returns the path to the cache file for agentName and ensures the
+// parent directory exists.
+func CachePath(agentName string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("get home dir: %w", err)
@@ -38,31 +40,31 @@ func feedbackCachePath(agentName string) (string, error) {
 	return filepath.Join(dir, safe+".json"), nil
 }
 
-// loadFeedbackCache reads the cache file for agentName. Returns an empty cache
-// if the file does not exist yet.
-func loadFeedbackCache(agentName string) (*FeedbackCache, error) {
-	path, err := feedbackCachePath(agentName)
+// Load reads the cache file for agentName. Returns an empty Cache if the file
+// does not exist yet.
+func Load(agentName string) (*Cache, error) {
+	path, err := CachePath(agentName)
 	if err != nil {
 		return nil, err
 	}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return &FeedbackCache{}, nil
+		return &Cache{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read cache: %w", err)
 	}
-	var c FeedbackCache
+	var c Cache
 	if err := json.Unmarshal(data, &c); err != nil {
 		// Corrupt cache — start fresh.
-		return &FeedbackCache{}, nil
+		return &Cache{}, nil
 	}
 	return &c, nil
 }
 
-// saveFeedbackCache writes the cache to disk.
-func saveFeedbackCache(agentName string, c *FeedbackCache) error {
-	path, err := feedbackCachePath(agentName)
+// Save writes the cache to disk atomically (write to .tmp, then rename).
+func Save(agentName string, c *Cache) error {
+	path, err := CachePath(agentName)
 	if err != nil {
 		return err
 	}
@@ -70,7 +72,6 @@ func saveFeedbackCache(agentName string, c *FeedbackCache) error {
 	if err != nil {
 		return fmt.Errorf("marshal cache: %w", err)
 	}
-	// Write to a temp file then rename for atomicity.
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write cache tmp: %w", err)
@@ -81,11 +82,11 @@ func saveFeedbackCache(agentName string, c *FeedbackCache) error {
 	return nil
 }
 
-// merge adds any records from fresh that are not already present in c.
+// Merge adds any records from fresh that are not already present in c.
 // Existing records retain their Checked state.
 // RecordID is used as the unique key. When it is empty a synthetic key
 // (timestamp + "|" + user) is written into RecordID before storing.
-func (c *FeedbackCache) merge(records []api.FeedbackRecord) {
+func (c *Cache) Merge(records []api.FeedbackRecord) {
 	existing := make(map[string]struct{}, len(c.Records))
 	for _, r := range c.Records {
 		existing[r.RecordID] = struct{}{}
@@ -97,7 +98,7 @@ func (c *FeedbackCache) merge(records []api.FeedbackRecord) {
 		if _, found := existing[r.RecordID]; found {
 			continue
 		}
-		c.Records = append(c.Records, CachedFeedbackRecord{
+		c.Records = append(c.Records, Record{
 			Checked:        false,
 			FeedbackRecord: r,
 		})
