@@ -33,7 +33,15 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "apply [path]",
 		Short: "Apply agent changes",
-		Args:  cobra.MaximumNArgs(1),
+		Example: `  # Apply current directory (with confirmation prompt)
+  coragent apply
+
+  # Apply a single file, skip confirmation
+  coragent apply agent.yaml -y
+
+  # Apply all agents recursively and run eval tests after
+  coragent apply -R ./agents/ --eval`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "."
 			if len(args) == 1 {

@@ -13,7 +13,15 @@ func newValidateCmd(opts *RootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "validate [path]",
 		Short: "Validate YAML files without applying",
-		Args:  cobra.MaximumNArgs(1),
+		Example: `  # Validate current directory
+  coragent validate
+
+  # Validate a single file
+  coragent validate agent.yaml
+
+  # Validate all agents in a directory tree
+  coragent validate -R ./agents/`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "."
 			if len(args) == 1 {

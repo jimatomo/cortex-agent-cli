@@ -132,15 +132,15 @@ Large files are hard to read and review:
 
 ### 3-3. Add CHANGELOG
 
-- [ ] Create `CHANGELOG.md` using [Keep a Changelog](https://keepachangelog.com/) format
-- [ ] Back-fill notable changes since the initial commit
+- [x] Create `CHANGELOG.md` using [Keep a Changelog](https://keepachangelog.com/) format
+- [x] Back-fill notable changes since the initial commit
 - [ ] Add CHANGELOG update to the release checklist
 
 ### 3-4. Improve public-facing documentation
 
-- [ ] `README.md`: add a quick-start section showing the minimal config to run `coragent apply`
-- [ ] Each command: ensure `--help` output fully describes all flags and shows at least one example
-- [ ] Document `.coragent.toml` schema with all supported keys
+- [x] `README.md`: add a quick-start section showing the minimal config to run `coragent apply`
+- [x] Each command: ensure `--help` output fully describes all flags and shows at least one example
+- [x] Document `.coragent.toml` schema with all supported keys
 
 ### 3-5. Linter and formatting enforcement
 

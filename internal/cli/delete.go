@@ -25,7 +25,15 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete [path]",
 		Short: "Delete agents defined in YAML files",
-		Args:  cobra.MaximumNArgs(1),
+		Example: `  # Delete agents in current directory (with confirmation prompt)
+  coragent delete
+
+  # Delete a specific agent file, skip confirmation
+  coragent delete agent.yaml -y
+
+  # Delete all agents in a directory tree
+  coragent delete -R ./agents/`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "."
 			if len(args) == 1 {

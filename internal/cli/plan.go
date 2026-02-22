@@ -20,7 +20,15 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "plan [path]",
 		Short: "Show execution plan without applying changes",
-		Args:  cobra.MaximumNArgs(1),
+		Example: `  # Plan current directory
+  coragent plan
+
+  # Plan a single file
+  coragent plan agent.yaml
+
+  # Plan all agents in a directory tree
+  coragent plan -R ./agents/`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "."
 			if len(args) == 1 {

@@ -17,7 +17,12 @@ func newExportCmd(opts *RootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "export <agent-name>",
 		Short: "Export existing agent to YAML",
-		Args:  cobra.ExactArgs(1),
+		Example: `  # Print agent YAML to stdout
+  coragent export MY_AGENT
+
+  # Save exported YAML to a file
+  coragent export MY_AGENT -o agent.yaml`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
