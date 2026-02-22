@@ -22,6 +22,7 @@ func newFeedbackCmd(opts *RootOptions) *cobra.Command {
 	var jsonOut bool
 	var yes bool
 	var includeChecked bool
+	var noTools bool
 
 	cmd := &cobra.Command{
 		Use:   "feedback <agent-name>",
@@ -148,7 +149,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 			markedCount := 0
 
 			for i, r := range toShow {
-				printOneRecord(cmd, i+1, len(toShow), r, includeChecked)
+				printOneRecord(cmd, i+1, len(toShow), r, includeChecked, noTools)
 
 				// Already-checked records (only visible with --include-checked) skip the prompt.
 				if r.Checked {
@@ -196,12 +197,13 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON array")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Auto-confirm marking each record as checked")
 	cmd.Flags().BoolVar(&includeChecked, "include-checked", false, "Also show already-checked records")
+	cmd.Flags().BoolVar(&noTools, "no-tools", false, "Hide tool invocation details (Query, SQL, RespTime)")
 
 	return cmd
 }
 
 // printOneRecord prints a single feedback record with its index out of total.
-func printOneRecord(cmd *cobra.Command, idx, total int, r CachedFeedbackRecord, includeChecked bool) {
+func printOneRecord(cmd *cobra.Command, idx, total int, r CachedFeedbackRecord, includeChecked bool, noTools bool) {
 	checkedMark := ""
 	if includeChecked {
 		if r.Checked {
@@ -253,7 +255,37 @@ func printOneRecord(cmd *cobra.Command, idx, total int, r CachedFeedbackRecord, 
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), indent+strings.Repeat("─", sepWidth))
 	}
-
+	if r.ResponseTimeMs > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "      RespTime:  %s\n", formatDuration(time.Duration(r.ResponseTimeMs)*time.Millisecond))
+	}
+	if !noTools {
+		if len(r.ToolUses) > 0 {
+			var toolParts []string
+			for _, tu := range r.ToolUses {
+				toolParts = append(toolParts, tu.ToolType)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "      Tools:     %s\n", strings.Join(toolParts, " → "))
+			const subIndent = "         " // 9 spaces (3 deeper than top-level fields)
+			for i, tu := range r.ToolUses {
+				if tu.ToolType == "cortex_analyst_text_to_sql" && tu.Query != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "%sQuery[%d]:  %s\n", subIndent, i, indentMultiline(tu.Query, "                    "))
+				}
+				if tu.SQL != "" {
+					const sepWidth = 40
+					header := fmt.Sprintf("── SQL[%d] ", i)
+					fmt.Fprintln(cmd.OutOrStdout(), subIndent+header+strings.Repeat("─", sepWidth-len(header)))
+					for _, line := range strings.Split(tu.SQL, "\n") {
+						fmt.Fprintf(cmd.OutOrStdout(), "%s%s\n", subIndent, line)
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), subIndent+strings.Repeat("─", sepWidth))
+					fmt.Fprintln(cmd.OutOrStdout())
+				}
+				if tu.ToolStatus == "error" {
+					fmt.Fprintf(cmd.OutOrStdout(), "%sStatus[%d]: ERROR\n", subIndent, i)
+				}
+			}
+		}
+	}
 	if r.Sentiment == "unknown" && r.RawRecord != "" {
 		fmt.Fprintf(cmd.OutOrStdout(), "      Record:    %s\n", r.RawRecord)
 	}

@@ -14,7 +14,7 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 - Run agents with streaming response and multi-turn conversation support
 - Evaluate agent accuracy with test cases defined in YAML
 - LLM-as-a-Judge response scoring via Snowflake CORTEX.COMPLETE
-- View user feedback from observability data (negative/all, JSON output)
+- View user feedback from observability data (negative/all, JSON output, tool invocation details with SQL)
 - Variable substitution (`vars` and `env`) for environment-specific configuration
 - Recursive directory scanning for multi-agent projects
 - Key Pair (RSA JWT) authentication
@@ -517,6 +517,9 @@ coragent feedback my-agent --include-checked
 # Limit results
 coragent feedback my-agent --limit 20
 
+# Hide tool invocation details (Query, SQL, RespTime)
+coragent feedback my-agent --no-tools
+
 # JSON output (no check prompt)
 coragent feedback my-agent --json | jq .
 ```
@@ -530,6 +533,7 @@ coragent feedback my-agent --json | jq .
 | `--json` | Output as JSON array (skips check prompt) |
 | `-y`, `--yes` | Auto-confirm marking each record as checked |
 | `--include-checked` | Also show already-checked records (marked with `[✓]`) |
+| `--no-tools` | Hide tool invocation details (Tools, Query, SQL) |
 
 ### Requirements
 

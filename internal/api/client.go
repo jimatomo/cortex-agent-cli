@@ -1021,16 +1021,27 @@ func escapeSQLString(s string) string {
 
 // FeedbackRecord holds a single CORTEX_AGENT_FEEDBACK observability event.
 type FeedbackRecord struct {
-	RecordID   string   `json:"record_id"`            // RECORD_ATTRIBUTES['ai.observability.record_id']
-	Timestamp  string   `json:"timestamp"`
-	AgentName  string   `json:"agent_name"`
-	UserName   string   `json:"user_name"`
-	Sentiment  string   `json:"sentiment"` // "positive", "negative", "unknown"
-	Comment    string   `json:"comment"`
-	Categories []string `json:"categories,omitempty"`
-	Question   string   `json:"question,omitempty"`  // user's question from the associated REQUEST event
-	Response   string   `json:"response,omitempty"`  // agent's response from the associated REQUEST event
-	RawRecord  string   `json:"raw_record"` // VALUE column raw JSON (fallback display)
+	RecordID   string        `json:"record_id"`            // RECORD_ATTRIBUTES['ai.observability.record_id']
+	Timestamp  string        `json:"timestamp"`
+	AgentName  string        `json:"agent_name"`
+	UserName   string        `json:"user_name"`
+	Sentiment  string        `json:"sentiment"` // "positive", "negative", "unknown"
+	Comment    string        `json:"comment"`
+	Categories []string      `json:"categories,omitempty"`
+	Question   string        `json:"question,omitempty"`   // user's question from the associated REQUEST event
+	Response   string        `json:"response,omitempty"`   // agent's response from the associated REQUEST event
+	ToolUses       []ToolUseInfo `json:"tool_uses,omitempty"`       // tool invocations during agent response
+	ResponseTimeMs int64         `json:"response_time_ms,omitempty"` // total agent response latency in ms
+	RawRecord      string        `json:"raw_record"` // VALUE column raw JSON (fallback display)
+}
+
+// ToolUseInfo captures a single tool invocation from the agent's response.
+type ToolUseInfo struct {
+	ToolType   string `json:"tool_type"`            // e.g., "cortex_analyst_text_to_sql"
+	ToolName   string `json:"tool_name"`            // e.g., "sample_semantic_view"
+	Query      string `json:"query,omitempty"`      // input.query if present
+	ToolStatus string `json:"tool_status,omitempty"` // "success" or "error" from tool_result
+	SQL        string `json:"sql,omitempty"`         // generated SQL from tool_result
 }
 
 // GetFeedback queries SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS for
@@ -1156,6 +1167,8 @@ func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName string) 
 			if reqJSON, ok := row[idx].(string); ok && reqJSON != "" {
 				rec.Question = extractQuestion(reqJSON)
 				rec.Response = extractResponse(reqJSON)
+				rec.ToolUses = extractToolUses(reqJSON)
+				rec.ResponseTimeMs = extractResponseTimeMs(reqJSON)
 			}
 		}
 
@@ -1259,6 +1272,120 @@ func extractResponse(requestJSON string) string {
 		}
 	}
 	return strings.Join(parts, "")
+}
+
+// extractToolUses extracts the ordered list of tool invocations from a
+// CORTEX_AGENT_REQUEST VALUE JSON.
+// It performs two passes over the content array: first to index tool_result blocks
+// by tool_use_id, then to collect tool_use blocks and merge in status and SQL.
+func extractToolUses(requestJSON string) []ToolUseInfo {
+	var valMap map[string]any
+	if err := json.Unmarshal([]byte(requestJSON), &valMap); err != nil {
+		return nil
+	}
+	responseRaw, ok := valMap["snow.ai.observability.response"].(string)
+	if !ok || responseRaw == "" {
+		return nil
+	}
+	var responseMap map[string]any
+	if err := json.Unmarshal([]byte(responseRaw), &responseMap); err != nil {
+		return nil
+	}
+	contents, ok := responseMap["content"].([]any)
+	if !ok {
+		return nil
+	}
+
+	// First pass: index tool_result blocks by tool_use_id.
+	type toolResult struct {
+		status string
+		sql    string
+	}
+	results := make(map[string]toolResult)
+	for _, c := range contents {
+		cm, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, ok := cm["type"].(string); !ok || t != "tool_result" {
+			continue
+		}
+		tr, ok := cm["tool_result"].(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := tr["tool_use_id"].(string)
+		if id == "" {
+			continue
+		}
+		res := toolResult{}
+		if s, ok := tr["status"].(string); ok {
+			res.status = s
+		}
+		if conts, ok := tr["content"].([]any); ok {
+			for _, cv := range conts {
+				cvm, ok := cv.(map[string]any)
+				if !ok {
+					continue
+				}
+				if j, ok := cvm["json"].(map[string]any); ok {
+					if sql, ok := j["sql"].(string); ok && sql != "" {
+						res.sql = sql
+						break
+					}
+				}
+			}
+		}
+		results[id] = res
+	}
+
+	// Second pass: collect tool_use blocks and merge tool_result data.
+	var uses []ToolUseInfo
+	for _, c := range contents {
+		cm, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, ok := cm["type"].(string); !ok || t != "tool_use" {
+			continue
+		}
+		tu, ok := cm["tool_use"].(map[string]any)
+		if !ok {
+			continue
+		}
+		info := ToolUseInfo{}
+		if v, ok := tu["type"].(string); ok {
+			info.ToolType = v
+		}
+		if v, ok := tu["name"].(string); ok {
+			info.ToolName = v
+		}
+		if input, ok := tu["input"].(map[string]any); ok {
+			if q, ok := input["query"].(string); ok {
+				info.Query = q
+			}
+		}
+		if id, ok := tu["tool_use_id"].(string); ok && id != "" {
+			if res, ok := results[id]; ok {
+				info.ToolStatus = res.status
+				info.SQL = res.sql
+			}
+		}
+		uses = append(uses, info)
+	}
+	return uses
+}
+
+// extractResponseTimeMs extracts the agent response latency from a CORTEX_AGENT_REQUEST VALUE JSON.
+func extractResponseTimeMs(requestJSON string) int64 {
+	var valMap map[string]any
+	if err := json.Unmarshal([]byte(requestJSON), &valMap); err != nil {
+		return 0
+	}
+	if v, ok := valMap["snow.ai.observability.response_time_ms"].(float64); ok {
+		return int64(v)
+	}
+	return 0
 }
 
 // probeSentiment inspects a RECORD map for sentiment signals,
