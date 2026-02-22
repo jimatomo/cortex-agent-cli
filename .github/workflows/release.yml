@@ -20,9 +20,18 @@ jobs:
         with:
           go-version: "1.24.x"
 
+      - uses: actions/create-github-app-token@v1
+        id: homebrew-token
+        with:
+          app-id: ${{ vars.HOMEBREW_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          owner: jimatomo
+          repositories: homebrew-tap
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ steps.homebrew-token.outputs.token }}
