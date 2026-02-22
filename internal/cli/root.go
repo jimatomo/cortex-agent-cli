@@ -68,7 +68,10 @@ func Execute() {
 			fmt.Fprintln(os.Stderr, "DEBUG STACK TRACE:")
 			fmt.Fprintln(os.Stderr, string(debug.Stack()))
 		}
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		if !DebugEnabled {
+			fmt.Fprintln(os.Stderr, "  run with --debug for detailed trace output")
+		}
 		os.Exit(1)
 	}
 }

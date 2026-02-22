@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -32,7 +33,9 @@ func LoadCoragentConfig() CoragentConfig {
 
 	// 1. Current directory
 	if _, err := os.Stat(".coragent.toml"); err == nil {
-		toml.DecodeFile(".coragent.toml", &cfg)
+		if _, err := toml.DecodeFile(".coragent.toml", &cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: .coragent.toml parse error: %v\n", err)
+		}
 		return cfg
 	}
 
@@ -43,7 +46,9 @@ func LoadCoragentConfig() CoragentConfig {
 	}
 	globalPath := filepath.Join(home, ".coragent", "config.toml")
 	if _, err := os.Stat(globalPath); err == nil {
-		toml.DecodeFile(globalPath, &cfg)
+		if _, err := toml.DecodeFile(globalPath, &cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %s parse error: %v\n", globalPath, err)
+		}
 		return cfg
 	}
 

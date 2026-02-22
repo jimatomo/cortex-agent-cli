@@ -64,7 +64,9 @@ func newExportCmd(opts *RootOptions) *cobra.Command {
 			if err := enc.Encode(&doc); err != nil {
 				return fmt.Errorf("marshal YAML: %w", err)
 			}
-			enc.Close()
+			if err := enc.Close(); err != nil {
+				return fmt.Errorf("flush YAML encoder: %w", err)
+			}
 			data := buf.Bytes()
 
 			if outPath == "" {

@@ -131,7 +131,9 @@ func loadFromFile(path string, envName string) (AgentSpec, error) {
 	if err := enc.Encode(&doc); err != nil {
 		return AgentSpec{}, fmt.Errorf("re-encode YAML %q: %w", path, err)
 	}
-	enc.Close()
+	if err := enc.Close(); err != nil {
+		return AgentSpec{}, fmt.Errorf("flush YAML encoder %q: %w", path, err)
+	}
 
 	var spec AgentSpec
 	dec := yaml.NewDecoder(&buf)

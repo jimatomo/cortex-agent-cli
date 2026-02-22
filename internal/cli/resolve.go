@@ -19,7 +19,7 @@ func ResolveTarget(spec agent.AgentSpec, opts *RootOptions, cfg auth.Config) (Ta
 	schema := firstNonEmpty(opts.Schema, deployValue(spec, "schema"), cfg.Schema)
 
 	if db == "" || schema == "" {
-		return Target{}, fmt.Errorf("database/schema is required (use --database/--schema, YAML deploy.database/schema, or env SNOWFLAKE_DATABASE/SNOWFLAKE_SCHEMA)")
+		return Target{}, fmt.Errorf("database/schema is required — set SNOWFLAKE_DATABASE/SNOWFLAKE_SCHEMA, use --database/--schema flags, or add deploy.database/schema to the YAML spec")
 	}
 
 	quoteIDs := opts.QuoteIdentifiers || deployBoolValue(spec, "quote_identifiers")
