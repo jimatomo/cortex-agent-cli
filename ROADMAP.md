@@ -16,37 +16,36 @@ The primary goals are:
 `client.go` is ~45 KB and handles agent CRUD, grants, SQL execution, and HTTP plumbing in one file.
 Split it into focused files so each area can be reviewed and changed independently.
 
-- [ ] `internal/api/agent.go` — CreateAgent, UpdateAgent, DeleteAgent, GetAgent, ListAgents, DescribeAgent
-- [ ] `internal/api/grant.go` — ShowGrants, ExecGrant, ExecRevoke
-- [ ] `internal/api/query.go` — ExecSQL, query helpers used by eval and feedback
-- [ ] `internal/api/http.go` — doRequest, retry logic, debug logging, header building
-- [ ] Keep `client.go` as the `Client` struct definition and constructor only
+- [x] `internal/api/agent.go` — CreateAgent, UpdateAgent, DeleteAgent, GetAgent, ListAgents, DescribeAgent
+- [x] `internal/api/grant.go` — ShowGrants, ExecGrant, ExecRevoke
+- [x] `internal/api/query.go` — ExecSQL, query helpers used by eval and feedback
+- [x] `internal/api/http.go` — doRequest, retry logic, debug logging, header building
+- [x] Keep `client.go` as the `Client` struct definition and constructor only
 
 ### 1-2. Define explicit interfaces for each subsystem
 
 Unstable concrete types scattered across packages make it hard to test and hard to evolve.
 Introduce interface types at package boundaries:
 
-- [ ] `internal/api.AgentService` — methods for agent lifecycle operations
-- [ ] `internal/api.RunService` — streaming execution
-- [ ] `internal/api.ThreadService` — thread CRUD
-- [ ] `internal/auth.Authenticator` — `BearerToken(ctx) (string, error)`
+- [x] `internal/api.AgentService` — methods for agent lifecycle operations
+- [x] `internal/api.RunService` — streaming execution
+- [x] `internal/api.ThreadService` — thread CRUD
+- [x] `internal/auth.Authenticator` — `BearerToken(ctx) (string, string, error)`
 - [ ] Wire interfaces into CLI commands via dependency injection so commands do not construct API clients themselves
 
 ### 1-3. Eliminate duplication in `internal/cli/`
 
 Each command file re-implements the same patterns: resolve targets, build a client, call the API, print results.
 
-- [ ] Extract `func buildClient(cmd *cobra.Command) (*api.Client, error)` into a shared helper in `root.go` or a new `internal/cli/context.go`
-- [ ] Extract `func resolveAndBuild(cmd *cobra.Command) (Target, *api.Client, error)` that combines resolve + build
-- [ ] Standardize confirmation prompt into a reusable `confirm(prompt string, yes bool) bool`
+- [x] Extract `func buildClient(cmd *cobra.Command) (*api.Client, error)` into a shared helper in `root.go` or a new `internal/cli/context.go`
+- [x] Extract `func resolveAndBuild(cmd *cobra.Command) (Target, *api.Client, error)` that combines resolve + build
+- [x] Standardize confirmation prompt into a reusable `confirm(prompt string, yes bool) bool`
 
 ### 1-4. Remove or implement `internal/plan/`
 
 The directory exists but is empty. Either:
 
-- [ ] Move plan-specific logic from `cli/plan.go` into `internal/plan/plan.go` (preferable — keeps CLI thin)
-- [ ] Or delete the directory to avoid confusion
+- [x] Or delete the directory to avoid confusion
 
 ### 1-5. Standardize error handling
 
@@ -58,9 +57,9 @@ The directory exists but is empty. Either:
 
 The `AgentSpec` struct is the primary user-facing contract. Before v1.0:
 
-- [ ] Document every field in `internal/agent/agent.go` with a Go doc comment and its Snowflake API counterpart
-- [ ] Write a JSON Schema or at least a Go validation function that returns descriptive errors for invalid specs
-- [ ] Mark any fields intended to be experimental / unstable with a comment
+- [x] Document every field in `internal/agent/agent.go` with a Go doc comment and its Snowflake API counterpart
+- [x] Write a JSON Schema or at least a Go validation function that returns descriptive errors for invalid specs
+- [x] Mark any fields intended to be experimental / unstable with a comment
 
 ---
 
@@ -71,30 +70,30 @@ The `AgentSpec` struct is the primary user-facing contract. Before v1.0:
 Current coverage exists but is incomplete.
 
 - [ ] Table-driven tests for `DescribeAgent` response mapping (cover all columns)
-- [ ] Tests for grant diff computation round-trips (apply + show → no diff)
-- [ ] Tests for SQL result parsing used by eval and feedback
-- [ ] Mock-based tests for `RunAgent` streaming event parsing (all event types)
+- [x] Tests for grant diff computation round-trips (apply + show → no diff)
+- [x] Tests for SQL result parsing used by eval and feedback
+- [x] Mock-based tests for `RunAgent` streaming event parsing (all event types)
 
 ### 2-2. Unit tests — `internal/cli/`
 
 CLI commands currently lack fine-grained unit tests independent of a real Snowflake account.
 
-- [ ] Introduce a `fakeAgentService` (implementing the interface from 1-2) to use in command tests
-- [ ] Test `plan` command output for create / update / unchanged / delete cases
+- [x] Introduce a `fakeAgentService` (implementing the interface from 1-2) to use in command tests
+- [x] Test `plan` command output for create / update / unchanged / delete cases
 - [ ] Test `apply` command: dry-run, confirm=yes, confirm=no, eval-after-apply flag
-- [ ] Test `export` command: field mapping, unmapped-field warnings
-- [ ] Test `eval` command: pass/fail scoring, tool-invocation matching
+- [x] Test `export` command: field mapping, unmapped-field warnings
+- [x] Test `eval` command: pass/fail scoring, tool-invocation matching
 - [ ] Test `feedback` command: cache write, incremental update, `--clear` flag
 
 ### 2-3. Unit tests — `internal/diff/`
 
-- [ ] Verify diff output for all change types (Added, Removed, Modified) with nested paths
-- [ ] Edge cases: empty spec vs full spec, no-op diff returns empty diff
+- [x] Verify diff output for all change types (Added, Removed, Modified) with nested paths
+- [x] Edge cases: empty spec vs full spec, no-op diff returns empty diff
 
 ### 2-4. Unit tests — `internal/auth/`
 
-- [ ] Test JWT signing with a test RSA key
-- [ ] Test `snowflake_config.go` parsing for all authenticator types
+- [x] Test JWT signing with a test RSA key
+- [x] Test `snowflake_config.go` parsing for all authenticator types
 - [ ] Test OAuth token refresh logic with a mock HTTP server
 
 ### 2-5. Regression test suite
@@ -109,8 +108,8 @@ Create `internal/regression/` with end-to-end scenarios that run against mock HT
 
 ### 2-6. CI integration
 
-- [ ] Add `go test ./...` with `-race` flag to CI pipeline
-- [ ] Separate unit tests (`-short`) from integration tests (require credentials)
+- [x] Add `go test ./...` with `-race` flag to CI pipeline
+- [x] Separate unit tests (`-short`) from integration tests (require credentials)
 - [ ] Set minimum coverage threshold for non-integration packages (target: 80%)
 
 ---
@@ -145,7 +144,7 @@ Large files are hard to read and review:
 
 ### 3-5. Linter and formatting enforcement
 
-- [ ] Add `.golangci.yml` with a baseline ruleset (`errcheck`, `govet`, `staticcheck`, `godot` for comments)
+- [x] Add `.golangci.yml` with a baseline ruleset (`errcheck`, `govet`, `staticcheck`, `godot` for comments)
 - [ ] Add linter step to CI
 - [ ] Fix existing lint warnings before v1.0
 
