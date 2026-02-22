@@ -17,7 +17,11 @@ import (
 func buildClient(opts *RootOptions) (*api.Client, error) {
 	cfg := auth.LoadConfig(opts.Connection)
 	applyAuthOverrides(&cfg, opts)
-	return api.NewClientWithDebug(cfg, opts.Debug)
+	client, err := api.NewClientWithDebug(cfg, opts.Debug)
+	if err != nil {
+		return nil, UserErr(err)
+	}
+	return client, nil
 }
 
 // buildClientAndCfg constructs an API client and also returns the resolved
@@ -27,7 +31,7 @@ func buildClientAndCfg(opts *RootOptions) (*api.Client, auth.Config, error) {
 	applyAuthOverrides(&cfg, opts)
 	client, err := api.NewClientWithDebug(cfg, opts.Debug)
 	if err != nil {
-		return nil, auth.Config{}, err
+		return nil, auth.Config{}, UserErr(err)
 	}
 	return client, cfg, nil
 }

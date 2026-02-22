@@ -49,7 +49,7 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 
 			specs, err := agent.LoadAgents(path, recursive, opts.Env)
 			if err != nil {
-				return err
+				return UserErr(err)
 			}
 
 			client, cfg, err := buildClientAndCfg(opts)

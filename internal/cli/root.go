@@ -69,9 +69,14 @@ func Execute() {
 			fmt.Fprintln(os.Stderr, string(debug.Stack()))
 		}
 		fmt.Fprintln(os.Stderr, "Error:", err)
+		if IsUserError(err) {
+			// User/config errors: exit 1; --debug won't help
+			os.Exit(1)
+		}
 		if !DebugEnabled {
 			fmt.Fprintln(os.Stderr, "  run with --debug for detailed trace output")
 		}
-		os.Exit(1)
+		// Unexpected system errors: exit 2
+		os.Exit(2)
 	}
 }

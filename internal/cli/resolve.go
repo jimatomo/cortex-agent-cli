@@ -19,7 +19,7 @@ func ResolveTarget(spec agent.AgentSpec, opts *RootOptions, cfg auth.Config) (Ta
 	schema := firstNonEmpty(opts.Schema, deployValue(spec, "schema"), cfg.Schema)
 
 	if db == "" || schema == "" {
-		return Target{}, fmt.Errorf("database/schema is required — set SNOWFLAKE_DATABASE/SNOWFLAKE_SCHEMA, use --database/--schema flags, or add deploy.database/schema to the YAML spec")
+		return Target{}, UserErr(fmt.Errorf("database/schema is required — set SNOWFLAKE_DATABASE/SNOWFLAKE_SCHEMA, use --database/--schema flags, or add deploy.database/schema to the YAML spec"))
 	}
 
 	quoteIDs := opts.QuoteIdentifiers || deployBoolValue(spec, "quote_identifiers")
@@ -35,7 +35,7 @@ func ResolveTargetForExport(opts *RootOptions, cfg auth.Config) (Target, error) 
 	db := firstNonEmpty(opts.Database, cfg.Database)
 	schema := firstNonEmpty(opts.Schema, cfg.Schema)
 	if db == "" || schema == "" {
-		return Target{}, fmt.Errorf("database/schema is required for export (use --database/--schema or env SNOWFLAKE_DATABASE/SNOWFLAKE_SCHEMA)")
+		return Target{}, UserErr(fmt.Errorf("database/schema is required for export (use --database/--schema or env SNOWFLAKE_DATABASE/SNOWFLAKE_SCHEMA)"))
 	}
 
 	quoteIDs := opts.QuoteIdentifiers

@@ -49,7 +49,7 @@ The directory exists but is empty. Either:
 
 ### 1-5. Standardize error handling
 
-- [ ] Replace bare `fmt.Errorf` at call sites with structured sentinel errors or typed error types where callers need to distinguish them
+- [x] Replace bare `fmt.Errorf` at call sites with structured sentinel errors or typed error types where callers need to distinguish them
 - [x] Ensure all user-facing errors print a clear action hint (`--debug for details` in root; improved database/schema hint)
 - [x] Audit for swallowed errors: fixed `enc.Close()` in export.go and loader.go; TOML decode errors now warn to stderr
 
