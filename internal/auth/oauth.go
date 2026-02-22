@@ -129,7 +129,14 @@ func ExchangeCodeForTokens(ctx context.Context, cfg OAuthConfig, code string, co
 	if code == "" {
 		return nil, fmt.Errorf("authorization code is required")
 	}
+	tokenURL := fmt.Sprintf("https://%s.snowflakecomputing.com/oauth/token-request", cfg.Account)
+	return exchangeCodeForTokensInternal(ctx, cfg, code, codeVerifier, tokenURL, &http.Client{Timeout: 30 * time.Second})
+}
 
+// exchangeCodeForTokensInternal is the testable core of ExchangeCodeForTokens.
+// It accepts explicit tokenURL and httpClient parameters so unit tests can point
+// the function at an httptest.Server without real Snowflake connectivity.
+func exchangeCodeForTokensInternal(ctx context.Context, cfg OAuthConfig, code, codeVerifier, tokenURL string, httpClient *http.Client) (*OAuthTokens, error) {
 	clientID := cfg.ClientID
 	if clientID == "" {
 		clientID = DefaultOAuthClientID
@@ -145,15 +152,13 @@ func ExchangeCodeForTokens(ctx context.Context, cfg OAuthConfig, code string, co
 		redirectURI = DefaultOAuthRedirectURI
 	}
 
-	tokenURL := fmt.Sprintf("https://%s.snowflakecomputing.com/oauth/token-request", cfg.Account)
-
 	data := url.Values{
 		"grant_type":   {"authorization_code"},
 		"code":         {code},
 		"redirect_uri": {redirectURI},
 	}
 
-	// Include code_verifier for PKCE
+	// Include code_verifier for PKCE.
 	if codeVerifier != "" {
 		data.Set("code_verifier", codeVerifier)
 	}
@@ -166,8 +171,7 @@ func ExchangeCodeForTokens(ctx context.Context, cfg OAuthConfig, code string, co
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(clientID, clientSecret)
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("token request failed: %w", err)
 	}
@@ -187,16 +191,14 @@ func ExchangeCodeForTokens(ctx context.Context, cfg OAuthConfig, code string, co
 		return nil, fmt.Errorf("decode token response: %w", err)
 	}
 
-	tokens := &OAuthTokens{
+	return &OAuthTokens{
 		Account:      strings.ToUpper(cfg.Account),
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
 		TokenType:    tokenResp.TokenType,
 		ExpiresAt:    time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
 		Scope:        tokenResp.Scope,
-	}
-
-	return tokens, nil
+	}, nil
 }
 
 // RefreshAccessToken uses a refresh token to obtain a new access token.
@@ -207,7 +209,14 @@ func RefreshAccessToken(ctx context.Context, cfg OAuthConfig, refreshToken strin
 	if refreshToken == "" {
 		return nil, fmt.Errorf("refresh token is required")
 	}
+	tokenURL := fmt.Sprintf("https://%s.snowflakecomputing.com/oauth/token-request", cfg.Account)
+	return refreshAccessTokenInternal(ctx, cfg, refreshToken, tokenURL, &http.Client{Timeout: 30 * time.Second})
+}
 
+// refreshAccessTokenInternal is the testable core of RefreshAccessToken.
+// It accepts explicit tokenURL and httpClient parameters so unit tests can point
+// the function at an httptest.Server without real Snowflake connectivity.
+func refreshAccessTokenInternal(ctx context.Context, cfg OAuthConfig, refreshToken, tokenURL string, httpClient *http.Client) (*OAuthTokens, error) {
 	clientID := cfg.ClientID
 	if clientID == "" {
 		clientID = DefaultOAuthClientID
@@ -223,8 +232,6 @@ func RefreshAccessToken(ctx context.Context, cfg OAuthConfig, refreshToken strin
 		redirectURI = DefaultOAuthRedirectURI
 	}
 
-	tokenURL := fmt.Sprintf("https://%s.snowflakecomputing.com/oauth/token-request", cfg.Account)
-
 	data := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
@@ -239,8 +246,7 @@ func RefreshAccessToken(ctx context.Context, cfg OAuthConfig, refreshToken strin
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(clientID, clientSecret)
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("refresh request failed: %w", err)
 	}
@@ -269,7 +275,7 @@ func RefreshAccessToken(ctx context.Context, cfg OAuthConfig, refreshToken strin
 		Scope:        tokenResp.Scope,
 	}
 
-	// If the refresh response doesn't include a new refresh token, keep the old one
+	// If the refresh response doesn't include a new refresh token, keep the old one.
 	if tokens.RefreshToken == "" {
 		tokens.RefreshToken = refreshToken
 	}
