@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,22 +67,30 @@ type sqlStatementResponse struct {
 
 // MockServer is a test HTTP server that simulates the Snowflake Cortex Agent API.
 type MockServer struct {
-	srv    *httptest.Server
-	store  *AgentStore
-	grants map[string][]string // agentKey → []"PRIVILEGE:GRANTED_TO:GRANTEE_NAME"
-	mu     sync.Mutex
+	srv      *httptest.Server
+	store    *AgentStore
+	grants   map[string][]string // agentKey → []"PRIVILEGE:GRANTED_TO:GRANTEE_NAME"
+	runReply map[string]string   // agentKey → raw SSE body to stream on :run
+	threads  map[string]map[string]any
+	nextTID  int64
+	mu       sync.Mutex
 }
 
 // NewMockServer creates and starts a MockServer. The caller must call Close() when done.
 func NewMockServer(t *testing.T) *MockServer {
 	t.Helper()
 	ms := &MockServer{
-		store:  newAgentStore(),
-		grants: make(map[string][]string),
+		store:    newAgentStore(),
+		grants:   make(map[string][]string),
+		runReply: make(map[string]string),
+		threads:  make(map[string]map[string]any),
+		nextTID:  1,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v2/statements", ms.handleSQL)
 	mux.HandleFunc("/api/v2/databases/", ms.handleAgents)
+	mux.HandleFunc("/api/v2/cortex/threads", ms.handleThreads)
+	mux.HandleFunc("/api/v2/cortex/threads/", ms.handleThread)
 	ms.srv = httptest.NewServer(mux)
 	t.Cleanup(ms.srv.Close)
 	return ms
@@ -98,6 +107,37 @@ func (ms *MockServer) SetGrants(agentKey string, grants []string) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.grants[agentKey] = grants
+}
+
+// SetRunReply registers a raw SSE body to stream when the :run endpoint is called
+// for the given agent name. Use BuildSSEReply to construct well-formed SSE bodies.
+func (ms *MockServer) SetRunReply(agentName, sseBody string) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	ms.runReply[agentName] = sseBody
+}
+
+// BuildSSEReply constructs a minimal SSE stream that delivers textReply as a
+// text response with an optional list of tool names called before the final text.
+func BuildSSEReply(textReply string, toolNames ...string) string {
+	var b strings.Builder
+	seq := 1
+	fmt.Fprintf(&b, "event: response.status\ndata: {\"status\":\"running\",\"message\":\"\",\"sequence_number\":%d}\n\n", seq)
+	seq++
+	for i, tool := range toolNames {
+		fmt.Fprintf(&b, "event: response.tool_use\ndata: {\"name\":%q,\"tool_use_id\":\"id%d\",\"input\":{},\"content_index\":%d,\"sequence_number\":%d}\n\n",
+			tool, i, i, seq)
+		seq++
+		fmt.Fprintf(&b, "event: response.tool_result\ndata: {\"name\":%q,\"tool_use_id\":\"id%d\",\"status\":\"success\",\"content\":{},\"content_index\":%d,\"sequence_number\":%d}\n\n",
+			tool, i, i, seq)
+		seq++
+	}
+	fmt.Fprintf(&b, "event: response.text.delta\ndata: {\"text\":%q,\"content_index\":0,\"sequence_number\":%d}\n\n", textReply, seq)
+	seq++
+	fmt.Fprintf(&b, "event: metadata\ndata: {\"metadata\":{\"thread_id\":\"mock-thread\",\"message_id\":1,\"role\":\"assistant\"}}\n\n")
+	fmt.Fprintf(&b, "event: response.complete\ndata: {\"content\":[{\"type\":\"text\",\"text\":%q}]}\n\n", textReply)
+	_ = seq
+	return b.String()
 }
 
 func (ms *MockServer) handleSQL(w http.ResponseWriter, r *http.Request) {
@@ -274,14 +314,25 @@ func (ms *MockServer) handleGrant(w http.ResponseWriter, stmt string, isGrant bo
 }
 
 func (ms *MockServer) handleAgents(w http.ResponseWriter, r *http.Request) {
-	// URL pattern: /api/v2/databases/{db}/schemas/{schema}/agents[/{name}]
+	// URL pattern: /api/v2/databases/{db}/schemas/{schema}/agents[/{name}[:{action}]]
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v2/databases/"), "/")
-	// parts: [db, "schemas", schema, "agents"] or [db, "schemas", schema, "agents", name]
+	// parts: [db, "schemas", schema, "agents"] or [db, "schemas", schema, "agents", name[:action]]
 
 	hasName := len(parts) >= 5 && parts[4] != ""
 	var agentName string
 	if hasName {
-		agentName = stripQuotes(parts[4])
+		seg := parts[4]
+		// Strip action suffix (e.g. "my-agent:run" → "my-agent")
+		if idx := strings.Index(seg, ":"); idx >= 0 {
+			action := seg[idx+1:]
+			agentName = stripQuotes(seg[:idx])
+			if action == "run" && r.Method == http.MethodPost {
+				ms.handleRun(w, r, agentName)
+				return
+			}
+		} else {
+			agentName = stripQuotes(seg)
+		}
 	}
 
 	switch r.Method {
@@ -338,6 +389,77 @@ func (ms *MockServer) handleAgents(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleThreads handles the /api/v2/cortex/threads collection endpoint.
+func (ms *MockServer) handleThreads(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		ms.mu.Lock()
+		id := fmt.Sprintf("%d", ms.nextTID)
+		ms.nextTID++
+		now := int64(1000000) // fake epoch ms
+		t := map[string]any{
+			"thread_id":          id,
+			"thread_name":        "",
+			"origin_application": "coragent",
+			"created_on":         now,
+			"updated_on":         now,
+		}
+		ms.threads[id] = t
+		ms.mu.Unlock()
+		writeJSON(w, t)
+	case http.MethodGet:
+		ms.mu.Lock()
+		out := make([]map[string]any, 0, len(ms.threads))
+		for _, t := range ms.threads {
+			out = append(out, t)
+		}
+		ms.mu.Unlock()
+		writeJSON(w, out)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleThread handles /api/v2/cortex/threads/{id} (GET, DELETE).
+func (ms *MockServer) handleThread(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v2/cortex/threads/")
+	switch r.Method {
+	case http.MethodGet:
+		ms.mu.Lock()
+		t, ok := ms.threads[id]
+		ms.mu.Unlock()
+		if !ok {
+			writeNotFound(w)
+			return
+		}
+		writeJSON(w, t)
+	case http.MethodDelete:
+		ms.mu.Lock()
+		delete(ms.threads, id)
+		ms.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleRun serves the agent :run streaming endpoint.
+// It returns the pre-registered SSE body for the agent, or an empty response.
+func (ms *MockServer) handleRun(w http.ResponseWriter, _ *http.Request, agentName string) {
+	ms.mu.Lock()
+	body, ok := ms.runReply[agentName]
+	ms.mu.Unlock()
+
+	if !ok {
+		http.Error(w, "no run reply configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprint(w, body)
 }
 
 // TestRSAPEM generates a PKCS8 RSA private key PEM for use in tests.

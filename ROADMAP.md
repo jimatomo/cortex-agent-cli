@@ -103,8 +103,8 @@ Create `internal/regression/` with end-to-end scenarios that run against mock HT
 - [x] Scenario: full lifecycle — validate → plan → apply → export → delete
 - [x] Scenario: multi-environment variable substitution
 - [x] Scenario: grant add/remove across apply cycles
-- [ ] Scenario: eval with passing and failing test cases
-- [ ] Scenario: thread continuity across `run` invocations
+- [x] Scenario: eval with passing and failing test cases
+- [x] Scenario: thread continuity across `run` invocations
 
 ### 2-6. CI integration
 
