@@ -33,9 +33,14 @@ func (e APIError) Error() string {
 	return fmt.Sprintf("api error: status=%d body=%s", e.StatusCode, e.Body)
 }
 
-// isNotFoundError checks if the error indicates a resource does not exist.
-// This includes HTTP 404 errors and Snowflake SQL errors for non-existent objects.
-func isNotFoundError(err error) bool {
+// IsNotFoundError reports whether err indicates that a resource does not exist.
+// It returns true for HTTP 404 responses and for Snowflake SQL errors that
+// carry "does not exist" or "object not found" messages (including error code 002003).
+//
+// Most callers should prefer the (spec, exists, error) return pattern from
+// GetAgent rather than inspecting errors directly; this function is exported
+// for cases such as tests that receive raw errors from the API.
+func IsNotFoundError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -43,7 +48,7 @@ func isNotFoundError(err error) bool {
 		if apiErr.StatusCode == 404 {
 			return true
 		}
-		// Check for Snowflake SQL error messages indicating object does not exist
+		// Snowflake SQL errors for non-existent objects
 		bodyLower := strings.ToLower(apiErr.Body)
 		if strings.Contains(bodyLower, "does not exist") ||
 			strings.Contains(bodyLower, "object does not exist") ||
@@ -53,12 +58,12 @@ func isNotFoundError(err error) bool {
 		}
 	}
 	errMsg := strings.ToLower(err.Error())
-	if strings.Contains(errMsg, "does not exist") ||
-		strings.Contains(errMsg, "not found") {
-		return true
-	}
-	return false
+	return strings.Contains(errMsg, "does not exist") ||
+		strings.Contains(errMsg, "not found")
 }
+
+// isNotFoundError is the internal alias used within the api package.
+func isNotFoundError(err error) bool { return IsNotFoundError(err) }
 
 // discardLogger returns a slog.Logger that discards all output.
 func discardLogger() *slog.Logger {
