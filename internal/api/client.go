@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -62,12 +63,29 @@ func NewClient(cfg auth.Config) (*Client, error) {
 	return NewClientWithDebug(cfg, false)
 }
 
+// NewClientForTest creates a Client pointing at the given base URL.
+// Intended for use in tests against mock HTTP servers — no real Snowflake credentials required.
+func NewClientForTest(base *url.URL, cfg auth.Config) *Client {
+	return &Client{
+		baseURL:   base,
+		userAgent: "test",
+		http:      &http.Client{Timeout: 30 * time.Second},
+		authCfg:   cfg,
+	}
+}
+
 // NewClientWithDebug constructs a Client with optional debug logging enabled.
+// If the environment variable CORAGENT_API_BASE_URL is set, it overrides the
+// computed Snowflake endpoint — useful for testing against a mock HTTP server.
 func NewClientWithDebug(cfg auth.Config, debug bool) (*Client, error) {
 	if cfg.Account == "" {
 		return nil, fmt.Errorf("SNOWFLAKE_ACCOUNT is required")
 	}
-	base, err := url.Parse(fmt.Sprintf("https://%s.snowflakecomputing.com", cfg.Account))
+	rawURL := fmt.Sprintf("https://%s.snowflakecomputing.com", cfg.Account)
+	if override := os.Getenv("CORAGENT_API_BASE_URL"); override != "" {
+		rawURL = override
+	}
+	base, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse base url: %w", err)
 	}

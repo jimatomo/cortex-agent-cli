@@ -100,9 +100,9 @@ CLI commands currently lack fine-grained unit tests independent of a real Snowfl
 
 Create `internal/regression/` with end-to-end scenarios that run against mock HTTP servers (no real Snowflake required).
 
-- [ ] Scenario: full lifecycle — validate → plan → apply → export → delete
+- [x] Scenario: full lifecycle — validate → plan → apply → export → delete
 - [ ] Scenario: multi-environment variable substitution
-- [ ] Scenario: grant add/remove across apply cycles
+- [x] Scenario: grant add/remove across apply cycles
 - [ ] Scenario: eval with passing and failing test cases
 - [ ] Scenario: thread continuity across `run` invocations
 
