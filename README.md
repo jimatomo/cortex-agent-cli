@@ -22,6 +22,12 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 
 ## Install
 
+### Homebrew
+
+```bash
+brew install jimatomo/tap/coragent
+```
+
 ### Quick Install (Recommended)
 
 ```bash
