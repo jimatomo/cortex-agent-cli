@@ -102,7 +102,7 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 			}
 
 			if !autoApprove {
-				if !confirm("Delete these agents?") {
+				if !confirm("Delete these agents?", cmd.InOrStdin()) {
 					fmt.Fprintln(os.Stdout, "Aborted.")
 					return nil
 				}

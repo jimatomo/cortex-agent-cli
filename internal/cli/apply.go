@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"coragent/internal/agent"
-	"coragent/internal/api"
 	"coragent/internal/config"
 	"coragent/internal/diff"
 	"coragent/internal/grant"
@@ -154,49 +153,25 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 			}
 
 			if !autoApprove {
-				if !confirm("Apply these changes?") {
+				if !confirm("Apply these changes?", cmd.InOrStdin()) {
 					fmt.Fprintln(os.Stdout, "Aborted.")
 					return nil
 				}
 			}
 
-			var appliedItems []applyItem
 			for _, item := range planItems {
 				if !item.Exists {
 					color.New(color.FgGreen).Fprintf(os.Stdout, "Creating %s...\n", item.Parsed.Spec.Name)
-					if err := client.CreateAgent(context.Background(), item.Target.Database, item.Target.Schema, item.Parsed.Spec); err != nil {
-						return fmt.Errorf("snowflake API error: %w", err)
-					}
-					// Apply grants after creating the agent
-					if err := applyGrants(context.Background(), client, item.Target, item.Parsed.Spec, true); err != nil {
-						return fmt.Errorf("grant error: %w", err)
-					}
-					appliedItems = append(appliedItems, item)
-					continue
-				}
-
-				if !diff.HasChanges(item.Changes) {
+				} else if diff.HasChanges(item.Changes) {
+					color.New(color.FgYellow).Fprintf(os.Stdout, "Updating %s...\n", item.Parsed.Spec.Name)
+				} else {
 					color.New(color.FgCyan).Fprintf(os.Stdout, "No changes for %s\n", item.Parsed.Spec.Name)
-					// Still apply grants even if agent has no changes
-					if err := applyGrants(context.Background(), client, item.Target, item.Parsed.Spec, true); err != nil {
-						return fmt.Errorf("grant error: %w", err)
-					}
-					continue
 				}
+			}
 
-				color.New(color.FgYellow).Fprintf(os.Stdout, "Updating %s...\n", item.Parsed.Spec.Name)
-				payload, err := updatePayload(item.Parsed.Spec, item.Changes)
-				if err != nil {
-					return fmt.Errorf("%s: %w", item.Parsed.Path, err)
-				}
-				if err := client.UpdateAgent(context.Background(), item.Target.Database, item.Target.Schema, item.Parsed.Spec.Name, payload); err != nil {
-					return fmt.Errorf("snowflake API error: %w", err)
-				}
-				// Apply grants after updating the agent
-				if err := applyGrants(context.Background(), client, item.Target, item.Parsed.Spec, true); err != nil {
-					return fmt.Errorf("grant error: %w", err)
-				}
-				appliedItems = append(appliedItems, item)
+			appliedItems, err := executeApply(context.Background(), planItems, client, client)
+			if err != nil {
+				return err
 			}
 
 			color.New(color.FgGreen).Fprintln(os.Stdout, "\nApply complete successfully!")
@@ -301,64 +276,6 @@ func topLevel(path string) string {
 		return ""
 	}
 	return strings.Split(parts[0], "[")[0]
-}
-
-// applyGrants computes grant diff and executes necessary GRANT/REVOKE statements.
-func applyGrants(ctx context.Context, client *api.Client, target Target, spec agent.AgentSpec, agentExists bool) error {
-	// Get desired state from YAML
-	var grantCfg *agent.GrantConfig
-	if spec.Deploy != nil {
-		grantCfg = spec.Deploy.Grant
-	}
-	desired := grant.FromGrantConfig(grantCfg)
-
-	// Get current state from Snowflake (only if agent exists)
-	var current grant.GrantState
-	if agentExists {
-		rows, err := client.ShowGrants(ctx, target.Database, target.Schema, spec.Name)
-		if err != nil {
-			return fmt.Errorf("show grants: %w", err)
-		}
-		current = grant.FromShowGrantsRows(convertGrantRows(rows))
-	}
-
-	// Compute diff
-	diff := grant.ComputeDiff(desired, current)
-
-	if !diff.HasChanges() {
-		return nil
-	}
-
-	var grantErrors []string
-
-	// Execute REVOKEs first (remove old permissions before adding new)
-	for _, e := range diff.ToRevoke {
-		if err := client.ExecuteRevoke(ctx, target.Database, target.Schema,
-			spec.Name, e.RoleType, e.RoleName, e.Privilege); err != nil {
-			grantErrors = append(grantErrors,
-				fmt.Sprintf("REVOKE %s FROM %s %s: %v", e.Privilege, e.RoleType, e.RoleName, err))
-		} else {
-			color.New(color.FgRed).Fprintf(os.Stdout,
-				"  Revoked %s from %s %s\n", e.Privilege, e.RoleType, e.RoleName)
-		}
-	}
-
-	// Execute GRANTs
-	for _, e := range diff.ToGrant {
-		if err := client.ExecuteGrant(ctx, target.Database, target.Schema,
-			spec.Name, e.RoleType, e.RoleName, e.Privilege); err != nil {
-			grantErrors = append(grantErrors,
-				fmt.Sprintf("GRANT %s TO %s %s: %v", e.Privilege, e.RoleType, e.RoleName, err))
-		} else {
-			color.New(color.FgGreen).Fprintf(os.Stdout,
-				"  Granted %s to %s %s\n", e.Privilege, e.RoleType, e.RoleName)
-		}
-	}
-
-	if len(grantErrors) > 0 {
-		return fmt.Errorf("grant/revoke errors:\n  %s", strings.Join(grantErrors, "\n  "))
-	}
-	return nil
 }
 
 // showApplyGrantPlan displays the grant diff in apply plan output.

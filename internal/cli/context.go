@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -31,10 +32,11 @@ func buildClientAndCfg(opts *RootOptions) (*api.Client, auth.Config, error) {
 	return client, cfg, nil
 }
 
-// confirm prints a [y/N] prompt and returns true if the user answers yes.
+// confirm prints a [y/N] prompt to stdout and reads one line from r.
+// Returns true if the user answers "y" or "yes" (case-insensitive).
 // It is used by apply and delete to guard destructive operations.
-func confirm(prompt string) bool {
-	reader := bufio.NewReader(os.Stdin)
+func confirm(prompt string, r io.Reader) bool {
+	reader := bufio.NewReader(r)
 	fmt.Fprint(os.Stdout, prompt+" [y/N]: ")
 	answer, _ := reader.ReadString('\n')
 	answer = strings.TrimSpace(strings.ToLower(answer))

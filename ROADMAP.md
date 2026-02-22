@@ -80,7 +80,7 @@ CLI commands currently lack fine-grained unit tests independent of a real Snowfl
 
 - [x] Introduce a `fakeAgentService` (implementing the interface from 1-2) to use in command tests
 - [x] Test `plan` command output for create / update / unchanged / delete cases
-- [ ] Test `apply` command: dry-run, confirm=yes, confirm=no, eval-after-apply flag
+- [x] Test `apply` command: `executeApply` (create/update/no-change/grants), `applyGrantDiff`, `confirm` with io.Reader injection
 - [x] Test `export` command: field mapping, unmapped-field warnings
 - [x] Test `eval` command: pass/fail scoring, tool-invocation matching
 - [x] Test `feedback` command: cache write, incremental update, `--clear` flag
