@@ -18,6 +18,7 @@ func newAuthCmd(opts *RootOptions) *cobra.Command {
 	}
 
 	cmd.AddCommand(newAuthStatusCmd(opts))
+	cmd.AddCommand(newAuthInitCmd(opts))
 
 	return cmd
 }

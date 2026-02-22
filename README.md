@@ -57,7 +57,17 @@ go build -o coragent ./cmd/coragent
 
 ### 1) Configure credentials
 
-Choose one of the following authentication methods:
+**Quickest setup: interactive wizard**
+
+```bash
+coragent auth init
+```
+
+This prompts for account, authenticator type, and other settings, then writes (or updates) the connection entry in `~/.snowflake/config.toml`. Run `coragent auth status` afterwards to verify.
+
+---
+
+Alternatively, edit the file manually using one of the options below.
 
 **Option A: Key Pair via config.toml (Recommended)**
 
@@ -248,9 +258,10 @@ Tokens are stored in `~/.coragent/oauth.json` and automatically refreshed when a
 ### Status and Logout
 
 ```bash
-coragent auth status                   # show token status
+coragent auth init                       # interactive config.toml setup wizard
+coragent auth status                     # show token status
 coragent logout --account your_account   # logout from specific account
-coragent logout --all                  # logout from all accounts
+coragent logout --all                    # logout from all accounts
 ```
 
 ### OAuth Environment Variables
@@ -275,6 +286,7 @@ coragent logout --all                  # logout from all accounts
 | `coragent threads` | Manage conversation threads |
 | `coragent login` | Authenticate with Snowflake using OAuth |
 | `coragent logout` | Remove stored OAuth tokens |
+| `coragent auth init` | Interactively configure `~/.snowflake/config.toml` |
 | `coragent auth status` | Show authentication status |
 
 ## Global Flags

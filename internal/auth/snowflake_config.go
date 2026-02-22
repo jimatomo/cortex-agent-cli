@@ -311,6 +311,90 @@ func DiagnoseConfig(connectionName string) ConfigDiagnostics {
 	return diag
 }
 
+// WriteConnection upserts a named connection entry in ~/.snowflake/config.toml.
+// The file (and its parent directory) are created if they do not exist.
+// If setAsDefault is true, default_connection_name is updated as well.
+// Returns the path of the file that was written.
+//
+// Note: the file is rewritten in its entirety; inline comments are not preserved.
+func WriteConnection(connName string, conn SnowflakeConnection, setAsDefault bool) (string, error) {
+	// Determine target path: prefer $SNOWFLAKE_HOME when set (even if the file
+	// doesn't exist yet), otherwise fall through to the first existing config or
+	// the default ~/.snowflake location.
+	var path string
+	if snowHome := os.Getenv("SNOWFLAKE_HOME"); snowHome != "" {
+		path = filepath.Join(snowHome, "config.toml")
+	} else {
+		path = findConfigPath()
+		if path == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return "", fmt.Errorf("get home dir: %w", err)
+			}
+			path = filepath.Join(home, ".snowflake", "config.toml")
+		}
+	}
+
+	var cfg snowflakeConfig
+	if _, err := os.Stat(path); err == nil {
+		if _, err2 := toml.DecodeFile(path, &cfg); err2 != nil {
+			return "", fmt.Errorf("parse %s: %w", path, err2)
+		}
+	}
+	if cfg.Connections == nil {
+		cfg.Connections = make(map[string]SnowflakeConnection)
+	}
+	cfg.Connections[connName] = conn
+	if setAsDefault {
+		cfg.DefaultConnectionName = connName
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return "", fmt.Errorf("create config dir: %w", err)
+	}
+
+	var sb strings.Builder
+	if cfg.DefaultConnectionName != "" {
+		fmt.Fprintf(&sb, "default_connection_name = %q\n", cfg.DefaultConnectionName)
+	}
+
+	names := make([]string, 0, len(cfg.Connections))
+	for n := range cfg.Connections {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	for _, n := range names {
+		c := cfg.Connections[n]
+		fmt.Fprintf(&sb, "\n[connections.%s]\n", n)
+		writeTomlField(&sb, "account", c.Account)
+		writeTomlField(&sb, "user", c.User)
+		writeTomlField(&sb, "role", c.Role)
+		writeTomlField(&sb, "warehouse", c.Warehouse)
+		writeTomlField(&sb, "database", c.Database)
+		writeTomlField(&sb, "schema", c.Schema)
+		writeTomlField(&sb, "authenticator", c.Authenticator)
+		writeTomlField(&sb, "private_key_file", c.PrivateKeyFile)
+		writeTomlField(&sb, "private_key_path", c.PrivateKeyPath)
+		writeTomlField(&sb, "private_key_raw", c.PrivateKeyRaw)
+		writeTomlField(&sb, "oauth_client_id", c.OAuthClientID)
+		writeTomlField(&sb, "oauth_client_secret", c.OAuthClientSecret)
+		writeTomlField(&sb, "oauth_redirect_uri", c.OAuthRedirectURI)
+	}
+
+	if err := os.WriteFile(path, []byte(sb.String()), 0600); err != nil {
+		return "", fmt.Errorf("write %s: %w", path, err)
+	}
+	return path, nil
+}
+
+// writeTomlField appends key = "value" to sb only when value is non-empty.
+func writeTomlField(sb *strings.Builder, key, value string) {
+	if value != "" {
+		fmt.Fprintf(sb, "%s = %q\n", key, value)
+	}
+}
+
 // overlayEnv overrides base config fields with environment variables when set.
 func overlayEnv(cfg *Config) {
 	if v := os.Getenv("SNOWFLAKE_ACCOUNT"); v != "" {

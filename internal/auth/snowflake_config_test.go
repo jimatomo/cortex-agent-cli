@@ -692,3 +692,165 @@ private_key_file = "`+keyPath+`"
 func containsStr(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
+
+// --- WriteConnection tests ---
+
+func TestWriteConnection_CreatesNewFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SNOWFLAKE_HOME", dir)
+
+	conn := SnowflakeConnection{
+		Account:       "myorg-myaccount",
+		User:          "myuser",
+		Authenticator: "SNOWFLAKE_JWT",
+		Role:          "myrole",
+		Database:      "mydb",
+		Schema:        "myschema",
+	}
+	path, err := WriteConnection("dev", conn, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path == "" {
+		t.Fatal("expected non-empty path")
+	}
+
+	// File must be readable back
+	loaded, err := LoadSnowflakeConnection("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded == nil {
+		t.Fatal("expected connection, got nil")
+	}
+	if loaded.Account != "myorg-myaccount" {
+		t.Errorf("account = %q, want %q", loaded.Account, "myorg-myaccount")
+	}
+	if loaded.User != "myuser" {
+		t.Errorf("user = %q, want %q", loaded.User, "myuser")
+	}
+	if loaded.Role != "myrole" {
+		t.Errorf("role = %q, want %q", loaded.Role, "myrole")
+	}
+	if loaded.Database != "mydb" {
+		t.Errorf("database = %q, want %q", loaded.Database, "mydb")
+	}
+	if loaded.Authenticator != "SNOWFLAKE_JWT" {
+		t.Errorf("authenticator = %q, want %q", loaded.Authenticator, "SNOWFLAKE_JWT")
+	}
+}
+
+func TestWriteConnection_SetsDefaultConnectionName(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SNOWFLAKE_HOME", dir)
+
+	conn := SnowflakeConnection{Account: "myaccount", Authenticator: "SNOWFLAKE_JWT"}
+	if _, err := WriteConnection("prod", conn, true); err != nil {
+		t.Fatal(err)
+	}
+
+	// default_connection_name should make the connection loadable with empty name
+	loaded, err := LoadSnowflakeConnection("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded == nil {
+		t.Fatal("expected connection via default name, got nil")
+	}
+	if loaded.Account != "myaccount" {
+		t.Errorf("account = %q, want %q", loaded.Account, "myaccount")
+	}
+}
+
+func TestWriteConnection_PreservesExistingConnections(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigFile(t, dir, `
+default_connection_name = "dev"
+
+[connections.dev]
+account = "devaccount"
+authenticator = "SNOWFLAKE_JWT"
+`)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+
+	// Add a second connection
+	conn := SnowflakeConnection{Account: "prodaccount", Authenticator: "OAUTH_AUTHORIZATION_CODE"}
+	if _, err := WriteConnection("prod", conn, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Original connection must still be loadable
+	dev, err := LoadSnowflakeConnection("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dev == nil || dev.Account != "devaccount" {
+		t.Errorf("dev connection missing or wrong account: %+v", dev)
+	}
+
+	// New connection must also be loadable
+	prod, err := LoadSnowflakeConnection("prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prod == nil || prod.Account != "prodaccount" {
+		t.Errorf("prod connection missing or wrong account: %+v", prod)
+	}
+}
+
+func TestWriteConnection_UpdatesExistingConnection(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigFile(t, dir, `
+default_connection_name = "dev"
+
+[connections.dev]
+account = "oldaccount"
+authenticator = "SNOWFLAKE_JWT"
+user = "olduser"
+`)
+	t.Setenv("SNOWFLAKE_HOME", dir)
+
+	updated := SnowflakeConnection{Account: "newaccount", Authenticator: "SNOWFLAKE_JWT", User: "newuser"}
+	if _, err := WriteConnection("dev", updated, true); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadSnowflakeConnection("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Account != "newaccount" {
+		t.Errorf("account = %q, want %q", loaded.Account, "newaccount")
+	}
+	if loaded.User != "newuser" {
+		t.Errorf("user = %q, want %q", loaded.User, "newuser")
+	}
+}
+
+func TestWriteConnection_OmitsEmptyFields(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SNOWFLAKE_HOME", dir)
+
+	conn := SnowflakeConnection{
+		Account:       "myaccount",
+		Authenticator: "OAUTH_AUTHORIZATION_CODE",
+		// User, Role, Database, Schema, PrivateKeyFile all empty
+	}
+	path, err := WriteConnection("myconn", conn, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+
+	// Empty fields must not appear
+	for _, field := range []string{"user =", "role =", "database =", "schema =", "private_key_file ="} {
+		if strings.Contains(content, field) {
+			t.Errorf("file should not contain %q but got:\n%s", field, content)
+		}
+	}
+}
