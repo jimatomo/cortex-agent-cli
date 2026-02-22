@@ -120,8 +120,8 @@ Create `internal/regression/` with end-to-end scenarios that run against mock HT
 
 Large files are hard to read and review:
 
-- [ ] `run.go` — separate streaming I/O handling into `internal/cli/run_io.go`
-- [ ] `eval.go` — separate judge logic into `internal/cli/eval_judge.go`
+- [x] `run.go` — separate streaming I/O handling into `internal/cli/run_io.go`
+- [x] `eval.go` — separate judge logic into `internal/cli/eval_judge.go`
 - [ ] `feedback.go` + `feedback_cache.go` — move cache to `internal/feedbackcache/` package for testability
 
 ### 3-2. Structured logging
