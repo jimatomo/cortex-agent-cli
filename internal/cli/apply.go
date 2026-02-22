@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 
 	"coragent/internal/agent"
 	"coragent/internal/api"
-	"coragent/internal/auth"
 	"coragent/internal/config"
 	"coragent/internal/diff"
 	"coragent/internal/grant"
@@ -47,10 +45,7 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 				return err
 			}
 
-			cfg := auth.LoadConfig(opts.Connection)
-			applyAuthOverrides(&cfg, opts)
-
-			client, err := api.NewClientWithDebug(cfg, opts.Debug)
+			client, cfg, err := buildClientAndCfg(opts)
 			if err != nil {
 				return err
 			}
@@ -87,7 +82,7 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("show grants: %w", err)
 				}
-				currentGrants := grant.FromShowGrantsRows(toGrantRows(grantRows))
+				currentGrants := grant.FromShowGrantsRows(convertGrantRows(grantRows))
 				grantDiff := grant.ComputeDiff(desiredGrants, currentGrants)
 
 				changes, err := diff.Diff(item.Spec, remote)
@@ -151,7 +146,7 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 			}
 
 			if !autoApprove {
-				if !confirmApply() {
+				if !confirm("Apply these changes?") {
 					fmt.Fprintln(os.Stdout, "Aborted.")
 					return nil
 				}
@@ -249,14 +244,6 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 	return cmd
 }
 
-func confirmApply() bool {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Fprint(os.Stdout, "Apply these changes? [y/N]: ")
-	answer, _ := reader.ReadString('\n')
-	answer = strings.TrimSpace(strings.ToLower(answer))
-	return answer == "y" || answer == "yes"
-}
-
 func updatePayload(spec agent.AgentSpec, changes []diff.Change) (map[string]any, error) {
 	data, err := json.Marshal(spec)
 	if err != nil {
@@ -324,7 +311,7 @@ func applyGrants(ctx context.Context, client *api.Client, target Target, spec ag
 		if err != nil {
 			return fmt.Errorf("show grants: %w", err)
 		}
-		current = grant.FromShowGrantsRows(toGrantRows(rows))
+		current = grant.FromShowGrantsRows(convertGrantRows(rows))
 	}
 
 	// Compute diff
@@ -364,19 +351,6 @@ func applyGrants(ctx context.Context, client *api.Client, target Target, spec ag
 		return fmt.Errorf("grant/revoke errors:\n  %s", strings.Join(grantErrors, "\n  "))
 	}
 	return nil
-}
-
-// toGrantRows converts api.ShowGrantsRow to grant.ShowGrantsRow
-func toGrantRows(rows []api.ShowGrantsRow) []grant.ShowGrantsRow {
-	result := make([]grant.ShowGrantsRow, len(rows))
-	for i, r := range rows {
-		result[i] = grant.ShowGrantsRow{
-			Privilege:   r.Privilege,
-			GrantedTo:   r.GrantedTo,
-			GranteeName: r.GranteeName,
-		}
-	}
-	return result
 }
 
 // showApplyGrantPlan displays the grant diff in apply plan output.

@@ -1,15 +1,11 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"coragent/internal/agent"
-	"coragent/internal/api"
-	"coragent/internal/auth"
 	"coragent/internal/diff"
 
 	"github.com/fatih/color"
@@ -41,10 +37,7 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 				return err
 			}
 
-			cfg := auth.LoadConfig(opts.Connection)
-			applyAuthOverrides(&cfg, opts)
-
-			client, err := api.NewClientWithDebug(cfg, opts.Debug)
+			client, cfg, err := buildClientAndCfg(opts)
 			if err != nil {
 				return err
 			}
@@ -101,7 +94,7 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 			}
 
 			if !autoApprove {
-				if !confirmDelete() {
+				if !confirm("Delete these agents?") {
 					fmt.Fprintln(os.Stdout, "Aborted.")
 					return nil
 				}
@@ -128,10 +121,3 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 	return cmd
 }
 
-func confirmDelete() bool {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Fprint(os.Stdout, "Delete these agents? [y/N]: ")
-	answer, _ := reader.ReadString('\n')
-	answer = strings.TrimSpace(strings.ToLower(answer))
-	return answer == "y" || answer == "yes"
-}

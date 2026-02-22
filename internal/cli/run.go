@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"coragent/internal/api"
-	"coragent/internal/auth"
 	"coragent/internal/thread"
 
 	"github.com/fatih/color"
@@ -71,10 +70,7 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
   coragent run my-agent -m "Complex query" --show-thinking`,
 		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := auth.LoadConfig(opts.Connection)
-			applyAuthOverrides(&cfg, opts)
-
-			client, err := api.NewClientWithDebug(cfg, opts.Debug)
+			client, cfg, err := buildClientAndCfg(opts)
 			if err != nil {
 				return err
 			}

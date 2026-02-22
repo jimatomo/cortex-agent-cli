@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"coragent/internal/agent"
-	"coragent/internal/api"
 	"coragent/internal/auth"
 	"coragent/internal/diff"
 	"coragent/internal/grant"
@@ -33,10 +32,7 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 				return err
 			}
 
-			cfg := auth.LoadConfig(opts.Connection)
-			applyAuthOverrides(&cfg, opts)
-
-			client, err := api.NewClientWithDebug(cfg, opts.Debug)
+			client, cfg, err := buildClientAndCfg(opts)
 			if err != nil {
 				return err
 			}
@@ -90,7 +86,7 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("show grants: %w", err)
 				}
-				currentGrants := grant.FromShowGrantsRows(planToGrantRows(grantRows))
+				currentGrants := grant.FromShowGrantsRows(convertGrantRows(grantRows))
 				grantDiff := grant.ComputeDiff(desiredGrants, currentGrants)
 
 				changes, err := diff.Diff(item.Spec, remote)
@@ -190,17 +186,4 @@ func showGrantPlan(diff grant.GrantDiff) {
 			e.RoleType,
 			e.RoleName)
 	}
-}
-
-// planToGrantRows converts api.ShowGrantsRow to grant.ShowGrantsRow
-func planToGrantRows(rows []api.ShowGrantsRow) []grant.ShowGrantsRow {
-	result := make([]grant.ShowGrantsRow, len(rows))
-	for i, r := range rows {
-		result[i] = grant.ShowGrantsRow{
-			Privilege:   r.Privilege,
-			GrantedTo:   r.GrantedTo,
-			GranteeName: r.GranteeName,
-		}
-	}
-	return result
 }

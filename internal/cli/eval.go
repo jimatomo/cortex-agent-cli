@@ -13,7 +13,6 @@ import (
 
 	"coragent/internal/agent"
 	"coragent/internal/api"
-	"coragent/internal/auth"
 	"coragent/internal/config"
 
 	"github.com/spf13/cobra"
@@ -269,10 +268,7 @@ Agents without an eval section are skipped.`,
 			}
 
 			// 2. Setup auth and client
-			cfg := auth.LoadConfig(opts.Connection)
-			applyAuthOverrides(&cfg, opts)
-
-			client, err := api.NewClientWithDebug(cfg, opts.Debug)
+			client, cfg, err := buildClientAndCfg(opts)
 			if err != nil {
 				return err
 			}

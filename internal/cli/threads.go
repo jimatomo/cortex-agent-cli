@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"coragent/internal/api"
-	"coragent/internal/auth"
 	"coragent/internal/thread"
 
 	"github.com/spf13/cobra"
@@ -57,10 +56,7 @@ Use --delete to delete a specific thread by ID.`,
 			}
 
 			// Delete and interactive modes need API client
-			cfg := auth.LoadConfig(opts.Connection)
-			applyAuthOverrides(&cfg, opts)
-
-			client, err := api.NewClientWithDebug(cfg, opts.Debug)
+			client, err := buildClient(opts)
 			if err != nil {
 				return err
 			}

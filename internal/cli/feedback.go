@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"coragent/internal/api"
-	"coragent/internal/auth"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -70,10 +68,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 				return nil
 			}
 
-			cfg := auth.LoadConfig(opts.Connection)
-			applyAuthOverrides(&cfg, opts)
-
-			client, err := api.NewClientWithDebug(cfg, opts.Debug)
+			client, cfg, err := buildClientAndCfg(opts)
 			if err != nil {
 				return err
 			}

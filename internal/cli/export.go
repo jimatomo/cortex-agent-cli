@@ -7,9 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"coragent/internal/api"
-	"coragent/internal/auth"
-
 	"gopkg.in/yaml.v3"
 
 	"github.com/spf13/cobra"
@@ -24,10 +21,7 @@ func newExportCmd(opts *RootOptions) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
-			cfg := auth.LoadConfig(opts.Connection)
-			applyAuthOverrides(&cfg, opts)
-
-			client, err := api.NewClientWithDebug(cfg, opts.Debug)
+			client, cfg, err := buildClientAndCfg(opts)
 			if err != nil {
 				return err
 			}
