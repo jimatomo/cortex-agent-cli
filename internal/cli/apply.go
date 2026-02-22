@@ -57,55 +57,19 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 				return err
 			}
 
-			var planItems []applyItem
+			planItems, err := buildPlanItems(context.Background(), specs, opts, cfg, client, client)
+			if err != nil {
+				return err
+			}
 			var createCount, updateCount, noChangeCount int
-			for _, item := range specs {
-				target, err := ResolveTarget(item.Spec, opts, cfg)
-				if err != nil {
-					return fmt.Errorf("%s: %w", item.Path, err)
-				}
-
-				remote, exists, err := client.GetAgent(context.Background(), target.Database, target.Schema, item.Spec.Name)
-				if err != nil {
-					return fmt.Errorf("snowflake API error: %w", err)
-				}
-
-				// Get desired grant state from YAML
-				var grantCfg *agent.GrantConfig
-				if item.Spec.Deploy != nil {
-					grantCfg = item.Spec.Deploy.Grant
-				}
-				desiredGrants := grant.FromGrantConfig(grantCfg)
-
-				if !exists {
+			for _, item := range planItems {
+				if !item.Exists {
 					createCount++
-					grantDiff := grant.ComputeDiff(desiredGrants, grant.GrantState{})
-					planItems = append(planItems, applyItem{Parsed: item, Target: target, Exists: false, GrantDiff: grantDiff})
-					continue
-				}
-
-				// Get current grant state from Snowflake
-				grantRows, err := client.ShowGrants(context.Background(), target.Database, target.Schema, item.Spec.Name)
-				if err != nil {
-					return fmt.Errorf("show grants: %w", err)
-				}
-				currentGrants := grant.FromShowGrantsRows(convertGrantRows(grantRows))
-				grantDiff := grant.ComputeDiff(desiredGrants, currentGrants)
-
-				changes, err := diff.Diff(item.Spec, remote)
-				if err != nil {
-					return fmt.Errorf("%s: %w", item.Path, err)
-				}
-
-				// Count as no change only if both spec and grants have no changes
-				if !diff.HasChanges(changes) && !grantDiff.HasChanges() {
+				} else if diff.HasChanges(item.Changes) || item.GrantDiff.HasChanges() {
+					updateCount++
+				} else {
 					noChangeCount++
-					planItems = append(planItems, applyItem{Parsed: item, Target: target, Exists: true, GrantDiff: grantDiff})
-					continue
 				}
-
-				updateCount++
-				planItems = append(planItems, applyItem{Parsed: item, Target: target, Exists: true, Changes: changes, GrantDiff: grantDiff})
 			}
 
 			// Show detailed plan output

@@ -45,36 +45,23 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 				return err
 			}
 
+			planItems, err := buildPlanItems(context.Background(), specs, opts, cfg, client, client)
+			if err != nil {
+				return err
+			}
+
 			var createCount, updateCount, noChangeCount int
-			for _, item := range specs {
-				target, err := ResolveTarget(item.Spec, opts, cfg)
-				if err != nil {
-					return fmt.Errorf("%s: %w", item.Path, err)
-				}
+			for _, pi := range planItems {
+				fmt.Fprintf(os.Stdout, "%s:\n", pi.Parsed.Spec.Name)
+				fmt.Fprintf(os.Stdout, "  database: %s\n", pi.Target.Database)
+				fmt.Fprintf(os.Stdout, "  schema:   %s\n", pi.Target.Schema)
 
-				remote, exists, err := client.GetAgent(context.Background(), target.Database, target.Schema, item.Spec.Name)
-				if err != nil {
-					return fmt.Errorf("snowflake API error: %w", err)
-				}
-
-				fmt.Fprintf(os.Stdout, "%s:\n", item.Spec.Name)
-				fmt.Fprintf(os.Stdout, "  database: %s\n", target.Database)
-				fmt.Fprintf(os.Stdout, "  schema:   %s\n", target.Schema)
-
-				// Get desired grant state from YAML
-				var grantCfg *agent.GrantConfig
-				if item.Spec.Deploy != nil {
-					grantCfg = item.Spec.Deploy.Grant
-				}
-				desiredGrants := grant.FromGrantConfig(grantCfg)
-
-				if !exists {
+				if !pi.Exists {
 					createCount++
 					color.New(color.FgGreen).Fprintln(os.Stdout, "  + create")
-					// Show what will be created
-					createChanges, err := diff.DiffForCreate(item.Spec)
+					createChanges, err := diff.DiffForCreate(pi.Parsed.Spec)
 					if err != nil {
-						return fmt.Errorf("%s: %w", item.Path, err)
+						return fmt.Errorf("%s: %w", pi.Parsed.Path, err)
 					}
 					for _, c := range createChanges {
 						fmt.Fprintf(os.Stdout, "    %s %s: %s\n",
@@ -83,33 +70,18 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 							formatValue(c.Before),
 						)
 					}
-					// Show grants for new agent (all are additions)
-					grantDiff := grant.ComputeDiff(desiredGrants, grant.GrantState{})
-					showGrantPlan(grantDiff)
+					showGrantPlan(pi.GrantDiff)
 					continue
 				}
 
-				// Get current grant state from Snowflake
-				grantRows, err := client.ShowGrants(context.Background(), target.Database, target.Schema, item.Spec.Name)
-				if err != nil {
-					return fmt.Errorf("show grants: %w", err)
-				}
-				currentGrants := grant.FromShowGrantsRows(convertGrantRows(grantRows))
-				grantDiff := grant.ComputeDiff(desiredGrants, currentGrants)
-
-				changes, err := diff.Diff(item.Spec, remote)
-				if err != nil {
-					return fmt.Errorf("%s: %w", item.Path, err)
-				}
-				if !diff.HasChanges(changes) && !grantDiff.HasChanges() {
+				if !diff.HasChanges(pi.Changes) && !pi.GrantDiff.HasChanges() {
 					noChangeCount++
 					color.New(color.FgCyan).Fprintln(os.Stdout, "  = no changes")
 					continue
 				}
 
-				// Count as update if there are agent spec changes or grant changes
 				updateCount++
-				for _, c := range changes {
+				for _, c := range pi.Changes {
 					fmt.Fprintf(os.Stdout, "  %s %s: %s -> %s\n",
 						changeSymbol(c.Type),
 						c.Path,
@@ -117,7 +89,7 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 						formatValue(c.After),
 					)
 				}
-				showGrantPlan(grantDiff)
+				showGrantPlan(pi.GrantDiff)
 			}
 
 			fmt.Fprintf(os.Stdout, "\nPlan: %d to create, %d to update, %d unchanged\n", createCount, updateCount, noChangeCount)

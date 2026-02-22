@@ -31,7 +31,7 @@ Introduce interface types at package boundaries:
 - [x] `internal/api.RunService` — streaming execution
 - [x] `internal/api.ThreadService` — thread CRUD
 - [x] `internal/auth.Authenticator` — `BearerToken(ctx) (string, string, error)`
-- [ ] Wire interfaces into CLI commands via dependency injection so commands do not construct API clients themselves
+- [x] Wire interfaces into CLI commands via dependency injection so commands do not construct API clients themselves
 
 ### 1-3. Eliminate duplication in `internal/cli/`
 
