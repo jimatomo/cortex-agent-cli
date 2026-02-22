@@ -120,6 +120,22 @@ output_dir = "./results"
 	}
 }
 
+func TestLoadCoragentConfig_MalformedTOML(t *testing.T) {
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origDir) })
+	os.Chdir(dir)
+
+	// Write a malformed TOML file
+	os.WriteFile(filepath.Join(dir, ".coragent.toml"), []byte("[[invalid toml"), 0o644)
+
+	// Should not panic; returns zero-value config
+	cfg := LoadCoragentConfig()
+	if cfg.Eval.OutputDir != "" {
+		t.Errorf("expected empty config for malformed TOML, got %q", cfg.Eval.OutputDir)
+	}
+}
+
 func TestLoadCoragentConfig_NoFile(t *testing.T) {
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()

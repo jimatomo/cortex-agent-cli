@@ -43,6 +43,13 @@ jobs:
             ./internal/grant/... \
             ./internal/thread/...
           go tool cover -func=coverage.out | tail -1
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
+          THRESHOLD=45
+          if awk "BEGIN {exit !($COVERAGE < $THRESHOLD)}"; then
+            echo "Coverage $COVERAGE% is below minimum threshold $THRESHOLD%"
+            exit 1
+          fi
+          echo "Coverage $COVERAGE% meets minimum threshold $THRESHOLD%"
 
   integration:
     runs-on: ubuntu-latest

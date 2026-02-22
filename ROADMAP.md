@@ -110,7 +110,7 @@ Create `internal/regression/` with end-to-end scenarios that run against mock HT
 
 - [x] Add `go test ./...` with `-race` flag to CI pipeline
 - [x] Separate unit tests (`-short`) from integration tests (require credentials)
-- [ ] Set minimum coverage threshold for non-integration packages (target: 80%)
+- [x] Set minimum coverage threshold for non-integration packages (baseline: 45%, target: 80%)
 
 ---
 
