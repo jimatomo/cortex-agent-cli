@@ -336,7 +336,7 @@ func runNew() error {
 			return UserErr(fmt.Errorf("tool name is required"))
 		}
 
-		toolDesc, err := promptWithDefault("Tool description", "")
+		toolDesc, err := readMultilinePrompt("Tool description (optional, blank line to finish)")
 		if err != nil {
 			return err
 		}
