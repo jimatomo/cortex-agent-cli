@@ -291,6 +291,7 @@ coragent logout --all                    # logout from all accounts
 | `coragent plan [path]` | Show execution plan without applying (default: `.`) |
 | `coragent apply [path]` | Apply changes to agents (default: `.`) |
 | `coragent delete [path]` | Delete agents defined in YAML files (default: `.`) |
+| `coragent new` | Interactively create a new agent YAML spec |
 | `coragent validate [path]` | Validate YAML files only (default: `.`) |
 | `coragent export <agent-name>` | Export existing agent to YAML |
 | `coragent run [agent-name]` | Run an agent with streaming response (interactive selection if omitted) |
@@ -312,6 +313,50 @@ coragent logout --all                    # logout from all accounts
 - `--env` / `-e`: Variable environment name (selects `vars` group in spec file)
 - `--quote-identifiers`: Double-quote database/schema names for case-sensitive identifiers
 - `--debug`: Enable debug logging with stack trace
+
+## New
+
+`coragent new` はインタラクティブなウィザードで、エージェントの YAML スペックファイルを対話形式で作成します。
+
+```bash
+coragent new
+```
+
+ウィザードを起動すると、以下の項目を順番に入力するよう促されます。
+
+| ステップ | 内容 |
+|----------|------|
+| 出力ファイル名 | デフォルト: `agent.yml` (既存ファイルの場合は上書き確認あり) |
+| 基本情報 | エージェント名 (必須)、コメント (任意) |
+| プロフィール | 表示名、アバターアイコン、カラーテーマ (任意) |
+| モデル | オーケストレーションモデル (デフォルト: `auto`) |
+| インストラクション | システムプロンプト、オーケストレーションプロンプト、レスポンスプロンプト、サンプル質問 (各任意・複数行入力可) |
+| オーケストレーション予算 | 最大実行秒数、最大トークン数 (任意) |
+| ツール | ツール名・説明・種別 (1つ以上必須)、複数追加可能 |
+
+### ツール種別
+
+| 種別 | 説明 |
+|------|------|
+| `cortex_analyst_text_to_sql` | セマンティックビューを使ったテキスト→SQL変換ツール |
+| `cortex_search` | Cortex Search サービスを使った検索ツール |
+
+### 使用例
+
+```bash
+coragent new
+# → 対話形式でエージェントの設定を入力
+# → agent.yml (または指定ファイル名) に YAML が出力される
+
+# 作成後はバリデーションで確認
+coragent validate agent.yml
+
+# 問題なければ plan/apply でデプロイ
+coragent plan
+coragent apply
+```
+
+ウィザード完了後、`coragent validate <ファイル名>` で内容を確認することを推奨します。
 
 ## Plan/Apply Behavior
 
