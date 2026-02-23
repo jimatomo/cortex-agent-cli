@@ -416,10 +416,8 @@ func runNew() error {
 			}
 
 			execEnv := map[string]any{
-				"type": "warehouse",
-			}
-			if warehouse != "" {
-				execEnv["warehouse"] = warehouse
+				"type":      "warehouse",
+				"warehouse": warehouse,
 			}
 			if v, convErr := strconv.Atoi(strings.TrimSpace(queryTimeoutStr)); convErr == nil {
 				execEnv["query_timeout"] = v
