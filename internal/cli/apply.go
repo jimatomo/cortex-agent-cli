@@ -101,11 +101,10 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 					continue
 				}
 				for _, c := range item.Changes {
-					fmt.Fprintf(os.Stdout, "  %s %s: %s -> %s\n",
+					fmt.Fprintf(os.Stdout, "  %s %s: %s\n",
 						changeSymbol(c.Type),
 						c.Path,
-						formatValue(c.Before),
-						formatValue(c.After),
+						formatChange(c),
 					)
 				}
 				showApplyGrantPlan(item.GrantDiff)

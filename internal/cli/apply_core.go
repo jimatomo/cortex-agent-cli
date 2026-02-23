@@ -28,6 +28,16 @@ func executeApply(
 			if err := agentSvc.CreateAgent(ctx, db, schema, item.Parsed.Spec); err != nil {
 				return applied, fmt.Errorf("create %s: %w", name, err)
 			}
+			// Snowflake's CREATE endpoint may not persist empty-string values in
+			// map fields (e.g. execution_environment.warehouse: ""). A follow-up
+			// UPDATE with tool_resources ensures the full spec is applied in one
+			// apply, so a second run is not required.
+			if len(item.Parsed.Spec.ToolResources) > 0 {
+				followUp := map[string]any{"tool_resources": item.Parsed.Spec.ToolResources}
+				if err := agentSvc.UpdateAgent(ctx, db, schema, name, followUp); err != nil {
+					return applied, fmt.Errorf("post-create update for %s: %w", name, err)
+				}
+			}
 			if err := applyGrantDiff(ctx, grantSvc, db, schema, name, item.GrantDiff); err != nil {
 				return applied, fmt.Errorf("grants for %s: %w", name, err)
 			}

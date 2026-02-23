@@ -175,3 +175,4 @@ type Tool struct {
 // Keys must match the name field inside the corresponding tool_spec.
 // Values are tool-specific resource maps (e.g. semantic_view, search_service).
 type ToolResources map[string]map[string]any
+

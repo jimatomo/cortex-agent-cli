@@ -71,7 +71,7 @@ func TestDiffForCreate(t *testing.T) {
 	}
 	// Log all changes for debugging
 	for _, c := range changes {
-		t.Logf("+ %s: %v", c.Path, c.Before)
+		t.Logf("+ %s: %v", c.Path, c.After)
 	}
 	// Should have at least: name, comment, profile.display_name, models.orchestration, orchestration.budget.seconds, orchestration.budget.tokens
 	if len(changes) < 6 {
@@ -661,7 +661,7 @@ func TestDiffForCreate_WithArrays(t *testing.T) {
 	}
 	// Log changes for debugging
 	for _, c := range changes {
-		t.Logf("+ %s: %v", c.Path, c.Before)
+		t.Logf("+ %s: %v", c.Path, c.After)
 	}
 	// Should have: name, tools[0].tool_spec.name, tools[1].tool_spec.name, instructions.sample_questions[0].question
 	if len(changes) < 4 {
@@ -886,7 +886,7 @@ func TestDiffForCreate_EmptyArray(t *testing.T) {
 	if len(changes) != 1 {
 		t.Logf("Changes found:")
 		for _, c := range changes {
-			t.Logf("  %s: %v", c.Path, c.Before)
+			t.Logf("  %s: %v", c.Path, c.After)
 		}
 		t.Fatalf("expected 1 change, got %d", len(changes))
 	}
@@ -909,7 +909,7 @@ func TestDiffForCreate_EmptyMap(t *testing.T) {
 	if len(changes) != 1 {
 		t.Logf("Changes found:")
 		for _, c := range changes {
-			t.Logf("  %s: %v", c.Path, c.Before)
+			t.Logf("  %s: %v", c.Path, c.After)
 		}
 		t.Fatalf("expected 1 change, got %d", len(changes))
 	}

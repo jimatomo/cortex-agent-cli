@@ -119,6 +119,31 @@ func TestExecuteApply_Create(t *testing.T) {
 	}
 }
 
+// TestExecuteApply_CreateWithToolResources verifies that CREATE is followed by an
+// UPDATE when the spec has tool_resources, ensuring empty-string values are applied.
+func TestExecuteApply_CreateWithToolResources(t *testing.T) {
+	svc := &applyFakeService{}
+	item := newApplyItem("new-agent", false, nil, grant.GrantDiff{})
+	item.Parsed.Spec.ToolResources = agent.ToolResources{
+		"analyst_tool": {"execution_environment": map[string]any{"type": "warehouse", "warehouse": ""}},
+	}
+
+	applied, err := executeApply(context.Background(), []applyItem{item}, svc, svc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(applied) != 1 {
+		t.Errorf("expected 1 applied item, got %d", len(applied))
+	}
+	if len(svc.CreateCalls) != 1 || svc.CreateCalls[0] != "new-agent" {
+		t.Errorf("CreateCalls = %v, want [new-agent]", svc.CreateCalls)
+	}
+	// A follow-up UPDATE must happen to persist tool_resources values.
+	if len(svc.UpdateCalls) != 1 || svc.UpdateCalls[0] != "new-agent" {
+		t.Errorf("UpdateCalls = %v, want [new-agent] (post-create sync)", svc.UpdateCalls)
+	}
+}
+
 // TestExecuteApply_Update verifies that an existing changed item calls UpdateAgent.
 func TestExecuteApply_Update(t *testing.T) {
 	svc := &applyFakeService{}

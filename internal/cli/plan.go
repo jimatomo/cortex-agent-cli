@@ -67,7 +67,7 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 						fmt.Fprintf(os.Stdout, "    %s %s: %s\n",
 							color.New(color.FgGreen).Sprint("+"),
 							c.Path,
-							formatValue(c.Before),
+							formatValue(c.After),
 						)
 					}
 					showGrantPlan(pi.GrantDiff)
@@ -82,11 +82,10 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 
 				updateCount++
 				for _, c := range pi.Changes {
-					fmt.Fprintf(os.Stdout, "  %s %s: %s -> %s\n",
+					fmt.Fprintf(os.Stdout, "  %s %s: %s\n",
 						changeSymbol(c.Type),
 						c.Path,
-						formatValue(c.Before),
-						formatValue(c.After),
+						formatChange(c),
 					)
 				}
 				showGrantPlan(pi.GrantDiff)
@@ -108,6 +107,17 @@ func changeSymbol(t diff.ChangeType) string {
 		return color.New(color.FgRed).Sprint("-")
 	default:
 		return color.New(color.FgYellow).Sprint("~")
+	}
+}
+
+func formatChange(c diff.Change) string {
+	switch c.Type {
+	case diff.Added:
+		return formatValue(c.After)
+	case diff.Removed:
+		return formatValue(c.Before)
+	default: // Modified
+		return fmt.Sprintf("%s -> %s", formatValue(c.Before), formatValue(c.After))
 	}
 }
 

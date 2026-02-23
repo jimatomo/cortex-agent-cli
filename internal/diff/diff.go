@@ -78,7 +78,7 @@ func collectAdded(path string, value any, changes *[]Change) {
 			collectAdded(nextPath, item, changes)
 		}
 	default:
-		*changes = append(*changes, Change{Path: path, Type: Added, Before: value, After: nil})
+		*changes = append(*changes, Change{Path: path, Type: Added, Before: nil, After: value})
 	}
 }
 
