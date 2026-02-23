@@ -128,7 +128,7 @@ func runNew() error {
 
 	var comment string
 	if !minimumMode {
-		comment, err = promptWithDefault("Comment (optional)", "")
+		comment, err = readMultilinePrompt("Comment (optional, blank line to finish)")
 		if err != nil {
 			return err
 		}
