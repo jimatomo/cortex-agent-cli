@@ -91,7 +91,7 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 					fmt.Fprintf(os.Stdout, "    %s %s: %s\n",
 						color.New(color.FgRed).Sprint("-"),
 						c.Path,
-						formatValue(c.Before),
+						formatValue(c.After),
 					)
 				}
 			}
