@@ -69,6 +69,17 @@ func runNew() error {
 	fmt.Println("=================")
 	fmt.Println()
 
+	// --- Mode selection ---
+	fmt.Println("Mode:")
+	fmt.Println("  1) Full    - configure all fields")
+	fmt.Println("  2) Minimum - name, tools only")
+	modeChoice, err := promptWithDefault("Choose [1/2]", "1")
+	if err != nil {
+		return err
+	}
+	minimumMode := strings.TrimSpace(modeChoice) == "2"
+	fmt.Println()
+
 	// --- Output file ---
 	outFile, err := promptWithDefault("Output file", "agent.yml")
 	if err != nil {
@@ -93,17 +104,34 @@ func runNew() error {
 	fmt.Println()
 	fmt.Println("--- Basic Info ---")
 
-	agentName, err := promptWithDefault("Agent name", "")
-	if err != nil {
-		return err
-	}
-	if agentName == "" {
-		return UserErr(fmt.Errorf("agent name is required"))
+	var agentName string
+	if minimumMode {
+		// Derive agent name from output filename (strip directory and extension)
+		base := outFile
+		if idx := strings.LastIndexByte(base, '/'); idx >= 0 {
+			base = base[idx+1:]
+		}
+		if dot := strings.LastIndex(base, "."); dot > 0 {
+			base = base[:dot]
+		}
+		agentName = base
+		fmt.Printf("  Agent name: %s\n", agentName)
+	} else {
+		agentName, err = promptWithDefault("Agent name", "")
+		if err != nil {
+			return err
+		}
+		if agentName == "" {
+			return UserErr(fmt.Errorf("agent name is required"))
+		}
 	}
 
-	comment, err := promptWithDefault("Comment (optional)", "")
-	if err != nil {
-		return err
+	var comment string
+	if !minimumMode {
+		comment, err = promptWithDefault("Comment (optional)", "")
+		if err != nil {
+			return err
+		}
 	}
 
 	spec := agent.AgentSpec{
@@ -111,173 +139,199 @@ func runNew() error {
 		Comment: comment,
 	}
 
-	// --- Profile (optional) ---
-	fmt.Println()
-	fmt.Println("--- Profile (optional) ---")
-
-	configProfile, err := promptWithDefault("Configure profile? [y/N]", "N")
-	if err != nil {
-		return err
-	}
-	if strings.ToLower(strings.TrimSpace(configProfile)) == "y" {
-		profile := &agent.Profile{}
-
-		displayName, err := promptWithDefault("Display name", "")
+	if minimumMode {
+		// --- Display name (minimum mode only) ---
+		displayName, err := promptWithDefault("Display name (optional)", "")
 		if err != nil {
 			return err
 		}
-		profile.DisplayName = displayName
+		if displayName != "" {
+			spec.Profile = &agent.Profile{DisplayName: displayName}
+		}
+	}
 
-		// Avatar selection
+	if !minimumMode {
+		// --- Profile (optional) ---
 		fmt.Println()
-		for i, av := range avatarOptions {
-			label := strings.TrimSuffix(av, "AgentIcon")
-			col := (i % 3) + 1
-			if col == 3 || i == len(avatarOptions)-1 {
-				fmt.Printf("  %2d) %s\n", i+1, label)
-			} else {
-				fmt.Printf("  %2d) %-14s", i+1, label)
-			}
-		}
-		avatarChoice, err := promptWithDefault("Choose [1-20] (optional, Enter to skip)", "")
+		fmt.Println("--- Profile (optional) ---")
+
+		configProfile, err := promptWithDefault("Configure profile? [y/N]", "N")
 		if err != nil {
 			return err
 		}
-		if avatarChoice != "" {
-			if idx, convErr := strconv.Atoi(strings.TrimSpace(avatarChoice)); convErr == nil && idx >= 1 && idx <= len(avatarOptions) {
-				profile.Avatar = avatarOptions[idx-1]
-			}
-		}
+		if strings.ToLower(strings.TrimSpace(configProfile)) == "y" {
+			profile := &agent.Profile{}
 
-		// Color selection
-		fmt.Println()
-		var colorLabels []string
-		for i, co := range colorOptions {
-			colorLabels = append(colorLabels, fmt.Sprintf("%d) %s", i+1, co.label))
-		}
-		fmt.Printf("  %s\n", strings.Join(colorLabels, "   "))
-		colorChoice, err := promptWithDefault("Choose [1-6] (optional, Enter to skip)", "")
-		if err != nil {
-			return err
-		}
-		if colorChoice != "" {
-			if idx, convErr := strconv.Atoi(strings.TrimSpace(colorChoice)); convErr == nil && idx >= 1 && idx <= len(colorOptions) {
-				profile.Color = colorOptions[idx-1].value
-			}
-		}
-
-		if profile.DisplayName != "" || profile.Avatar != "" || profile.Color != "" {
-			spec.Profile = profile
-		}
-	}
-
-	// --- Model ---
-	fmt.Println()
-	fmt.Println("--- Model ---")
-
-	orchModel, err := promptWithDefault("Orchestration model", "auto")
-	if err != nil {
-		return err
-	}
-	if orchModel != "" && orchModel != "auto" {
-		spec.Models = &agent.Models{Orchestration: orchModel}
-	}
-
-	// --- Instructions ---
-	fmt.Println()
-	fmt.Println("--- Instructions ---")
-
-	systemPrompt, err := readMultilinePrompt("System prompt (enter blank line to finish, optional)")
-	if err != nil {
-		return err
-	}
-
-	orchPrompt, err := readMultilinePrompt("Orchestration prompt (optional, blank line to finish)")
-	if err != nil {
-		return err
-	}
-
-	responsePrompt, err := readMultilinePrompt("Response prompt (optional, blank line to finish)")
-	if err != nil {
-		return err
-	}
-
-	var sampleQuestions []agent.SampleQuestion
-	addQuestionsAns, err := promptWithDefault("Add sample questions? [y/N]", "N")
-	if err != nil {
-		return err
-	}
-	if strings.ToLower(strings.TrimSpace(addQuestionsAns)) == "y" {
-		for {
-			q, err := promptWithDefault("Question", "")
+			displayName, err := promptWithDefault("Display name", "")
 			if err != nil {
 				return err
 			}
-			if q != "" {
-				sampleQuestions = append(sampleQuestions, agent.SampleQuestion{Question: q})
+			profile.DisplayName = displayName
+
+			// Avatar selection
+			fmt.Println()
+			for i, av := range avatarOptions {
+				label := strings.TrimSuffix(av, "AgentIcon")
+				col := (i % 3) + 1
+				if col == 3 || i == len(avatarOptions)-1 {
+					fmt.Printf("  %2d) %s\n", i+1, label)
+				} else {
+					fmt.Printf("  %2d) %-14s", i+1, label)
+				}
 			}
-			moreAns, err := promptWithDefault("Add another? [y/N]", "N")
+			avatarChoice, err := promptWithDefault("Choose [1-20] (optional, Enter to skip)", "")
 			if err != nil {
 				return err
 			}
-			if strings.ToLower(strings.TrimSpace(moreAns)) != "y" {
-				break
+			if avatarChoice != "" {
+				if idx, convErr := strconv.Atoi(strings.TrimSpace(avatarChoice)); convErr == nil && idx >= 1 && idx <= len(avatarOptions) {
+					profile.Avatar = avatarOptions[idx-1]
+				}
+			}
+
+			// Color selection
+			fmt.Println()
+			var colorLabels []string
+			for i, co := range colorOptions {
+				colorLabels = append(colorLabels, fmt.Sprintf("%d) %s", i+1, co.label))
+			}
+			fmt.Printf("  %s\n", strings.Join(colorLabels, "   "))
+			colorChoice, err := promptWithDefault("Choose [1-6] (optional, Enter to skip)", "")
+			if err != nil {
+				return err
+			}
+			if colorChoice != "" {
+				if idx, convErr := strconv.Atoi(strings.TrimSpace(colorChoice)); convErr == nil && idx >= 1 && idx <= len(colorOptions) {
+					profile.Color = colorOptions[idx-1].value
+				}
+			}
+
+			if profile.DisplayName != "" || profile.Avatar != "" || profile.Color != "" {
+				spec.Profile = profile
 			}
 		}
-	}
 
-	if systemPrompt != "" || orchPrompt != "" || responsePrompt != "" || len(sampleQuestions) > 0 {
-		instr := &agent.Instructions{}
-		if systemPrompt != "" {
-			instr.System = systemPrompt
-		}
-		if orchPrompt != "" {
-			instr.Orchestration = orchPrompt
-		}
-		if responsePrompt != "" {
-			instr.Response = responsePrompt
-		}
-		if len(sampleQuestions) > 0 {
-			instr.SampleQuestions = sampleQuestions
-		}
-		spec.Instructions = instr
-	}
+		// --- Model ---
+		fmt.Println()
+		fmt.Println("--- Model ---")
 
-	// --- Orchestration Budget ---
-	fmt.Println()
-	fmt.Println("--- Orchestration Budget ---")
-
-	budgetSecsStr, err := promptWithDefault("Budget seconds (e.g. 300, optional)", "")
-	if err != nil {
-		return err
-	}
-	budgetTokensStr, err := promptWithDefault("Budget tokens (e.g. 16000, optional)", "")
-	if err != nil {
-		return err
-	}
-
-	var budgetCfg *agent.BudgetConfig
-	budgetSecs, secsOK := strconv.Atoi(strings.TrimSpace(budgetSecsStr))
-	budgetTokens, tokensOK := strconv.Atoi(strings.TrimSpace(budgetTokensStr))
-	if secsOK == nil || tokensOK == nil {
-		budgetCfg = &agent.BudgetConfig{}
-		if secsOK == nil {
-			budgetCfg.Seconds = budgetSecs
+		orchModel, err := promptWithDefault("Orchestration model", "auto")
+		if err != nil {
+			return err
 		}
-		if tokensOK == nil {
-			budgetCfg.Tokens = budgetTokens
+		if orchModel != "" && orchModel != "auto" {
+			spec.Models = &agent.Models{Orchestration: orchModel}
 		}
-	}
-	if budgetCfg != nil {
-		spec.Orchestration = &agent.Orchestration{Budget: budgetCfg}
+
+		// --- Instructions ---
+		fmt.Println()
+		fmt.Println("--- Instructions ---")
+
+		systemPrompt, err := readMultilinePrompt("System prompt (enter blank line to finish, optional)")
+		if err != nil {
+			return err
+		}
+
+		orchPrompt, err := readMultilinePrompt("Orchestration prompt (optional, blank line to finish)")
+		if err != nil {
+			return err
+		}
+
+		responsePrompt, err := readMultilinePrompt("Response prompt (optional, blank line to finish)")
+		if err != nil {
+			return err
+		}
+
+		var sampleQuestions []agent.SampleQuestion
+		addQuestionsAns, err := promptWithDefault("Add sample questions? [y/N]", "N")
+		if err != nil {
+			return err
+		}
+		if strings.ToLower(strings.TrimSpace(addQuestionsAns)) == "y" {
+			for {
+				q, err := promptWithDefault("Question", "")
+				if err != nil {
+					return err
+				}
+				if q != "" {
+					sampleQuestions = append(sampleQuestions, agent.SampleQuestion{Question: q})
+				}
+				moreAns, err := promptWithDefault("Add another? [y/N]", "N")
+				if err != nil {
+					return err
+				}
+				if strings.ToLower(strings.TrimSpace(moreAns)) != "y" {
+					break
+				}
+			}
+		}
+
+		if systemPrompt != "" || orchPrompt != "" || responsePrompt != "" || len(sampleQuestions) > 0 {
+			instr := &agent.Instructions{}
+			if systemPrompt != "" {
+				instr.System = systemPrompt
+			}
+			if orchPrompt != "" {
+				instr.Orchestration = orchPrompt
+			}
+			if responsePrompt != "" {
+				instr.Response = responsePrompt
+			}
+			if len(sampleQuestions) > 0 {
+				instr.SampleQuestions = sampleQuestions
+			}
+			spec.Instructions = instr
+		}
+
+		// --- Orchestration Budget ---
+		fmt.Println()
+		fmt.Println("--- Orchestration Budget ---")
+
+		budgetSecsStr, err := promptWithDefault("Budget seconds (e.g. 300, optional)", "")
+		if err != nil {
+			return err
+		}
+		budgetTokensStr, err := promptWithDefault("Budget tokens (e.g. 16000, optional)", "")
+		if err != nil {
+			return err
+		}
+
+		var budgetCfg *agent.BudgetConfig
+		budgetSecs, secsOK := strconv.Atoi(strings.TrimSpace(budgetSecsStr))
+		budgetTokens, tokensOK := strconv.Atoi(strings.TrimSpace(budgetTokensStr))
+		if secsOK == nil || tokensOK == nil {
+			budgetCfg = &agent.BudgetConfig{}
+			if secsOK == nil {
+				budgetCfg.Seconds = budgetSecs
+			}
+			if tokensOK == nil {
+				budgetCfg.Tokens = budgetTokens
+			}
+		}
+		if budgetCfg != nil {
+			spec.Orchestration = &agent.Orchestration{Budget: budgetCfg}
+		}
 	}
 
 	// --- Tools ---
 	fmt.Println()
-	fmt.Println("--- Tools (at least one required) ---")
+	fmt.Println("--- Tools ---")
 
 	toolResources := agent.ToolResources{}
 	for {
+		fmt.Println()
+		fmt.Println("  Tool type:")
+		fmt.Println("    1) cortex_analyst_text_to_sql")
+		fmt.Println("    2) cortex_search")
+		fmt.Println("    3) Skip / add later")
+		toolTypeChoice, err := promptWithDefault("Choose [1/2/3]", "3")
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(toolTypeChoice) == "3" || strings.TrimSpace(toolTypeChoice) == "" {
+			break
+		}
+
 		toolName, err := promptWithDefault("Tool name", "")
 		if err != nil {
 			return err
@@ -287,15 +341,6 @@ func runNew() error {
 		}
 
 		toolDesc, err := promptWithDefault("Tool description", "")
-		if err != nil {
-			return err
-		}
-
-		fmt.Println()
-		fmt.Println("  Tool type:")
-		fmt.Println("    1) cortex_analyst_text_to_sql")
-		fmt.Println("    2) cortex_search")
-		toolTypeChoice, err := promptWithDefault("Choose [1/2]", "")
 		if err != nil {
 			return err
 		}
@@ -385,15 +430,6 @@ func runNew() error {
 		spec.Tools = append(spec.Tools, agent.Tool{ToolSpec: toolSpec})
 		if len(resource) > 0 {
 			toolResources[toolName] = resource
-		}
-
-		fmt.Println()
-		moreTools, err := promptWithDefault("Add another tool? [y/N]", "N")
-		if err != nil {
-			return err
-		}
-		if strings.ToLower(strings.TrimSpace(moreTools)) != "y" {
-			break
 		}
 		fmt.Println()
 	}
