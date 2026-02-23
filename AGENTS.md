@@ -1,157 +1,37 @@
 # AGENTS.md
 
-This file provides guidance for AI agents (like Claude Code) working on this codebase.
+This file provides guidance for AI agents (Claude Code, Codex, etc.) working on this codebase.
+For user-facing documentation, see [README.md](./README.md).
 
 ## Project Overview
 
-**coragent** (Cortex Agent CLI) is a command-line tool for managing Snowflake Cortex Agent deployments via the REST API. It enables infrastructure-as-code workflows with plan/apply operations similar to Terraform.
+**coragent** is a CLI tool for managing Snowflake Cortex Agent deployments via REST API, following a plan/apply workflow similar to Terraform.
 
-### Key Features
-- Deploy Cortex Agents from YAML files
-- Plan/Apply workflow with diff detection
-- YAML schema validation with strict unknown field rejection
-- Export existing agents to YAML
-- Key Pair (RSA JWT) authentication
-- Multi-platform binaries (Linux, macOS, Windows)
+- **Module:** `coragent` (Go 1.24.0)
+- **Philosophy:** Minimal dependencies, no external logging framework — uses `fmt` and `fatih/color`. Maintainability is prioritized; breaking changes are a valid option when they improve the codebase. Security is non-negotiable — always implement safely and avoid introducing vulnerabilities.
 
-## Project Structure
-
-```
-cortex-agent-cli/
-├── cmd/coragent/           # Entry point (main.go delegates to cli.Execute())
-├── internal/
-│   ├── agent/              # AgentSpec models and YAML loader
-│   ├── api/                # Snowflake REST API client
-│   ├── auth/               # JWT signing for Key Pair authentication
-│   ├── cli/                # Cobra command implementations
-│   ├── diff/               # Change detection algorithm
-│   └── plan/               # (Currently unused)
-├── examples/               # Sample YAML configurations
-├── .github/workflows/      # CI/CD (ci.yml, release.yml)
-├── .goreleaser.yaml        # Multi-platform build config
-└── go.mod                  # Go 1.22+ module
-```
-
-## Key Technologies
-
-- **Language:** Go 1.22+
-- **CLI Framework:** spf13/cobra
-- **YAML:** gopkg.in/yaml.v3 (strict mode)
-- **JWT:** golang-jwt/jwt/v5
-- **Build:** GoReleaser
-
-## Development Guidelines
-
-### Building
+## Development Commands
 
 ```bash
+# Build
 go build -o coragent ./cmd/coragent
-```
 
-### Running Tests
+# Unit tests (race detector + short mode)
+go test -race -short ./...
 
-```bash
-# Unit tests
-go test ./...
+# Integration tests (requires Snowflake credentials)
+go test -race -tags=integration ./...
 
-# With verbose output
-go test -v ./...
-
-# Specific package
-go test ./internal/agent/...
-go test ./internal/diff/...
-```
-
-### Code Quality
-
-```bash
+# Code quality
 go vet ./...
 go mod tidy
+golangci-lint run
 ```
-
-## Architecture Notes
-
-### Package Responsibilities
-
-| Package | Responsibility |
-|---------|----------------|
-| `internal/agent` | AgentSpec struct definitions, YAML file loading with strict validation |
-| `internal/api` | HTTP client for Snowflake REST API (CRUD operations, response parsing) |
-| `internal/auth` | Authentication (JWT generation for key pair) |
-| `internal/cli` | Command implementations (plan, apply, validate, export) |
-| `internal/diff` | Recursive comparison of local vs. remote AgentSpec |
-
-### Configuration Priority
-
-1. CLI flags (`--database`, `--schema`, `--account`, `--role`)
-2. YAML deploy section (`deploy.database`, `deploy.schema`)
-3. Environment variables (`SNOWFLAKE_DATABASE`, etc.)
-
-### Authentication
-
-Configured via environment variables:
-- `SNOWFLAKE_ACCOUNT` - Account identifier
-- `SNOWFLAKE_USER` - Username
-- `SNOWFLAKE_PRIVATE_KEY_PATH` - RSA private key file
-- `SNOWFLAKE_AUTHENTICATOR` - `KEYPAIR` (default) or `WORKLOAD_IDENTITY`
-
-Read local authentication variables
-
-```bash
-source .env
-```
-
-## Important Conventions
-
-### YAML Validation
-- Uses `yaml.KnownFields(true)` to reject unknown fields
-- Required fields: `name`, tool definitions need `tool_spec`
-
-### Identifier Handling
-- Special characters in database/schema/agent names are escaped
-- Case sensitivity is preserved via quoting
-
-### Error Handling
-- No external logging framework; uses `fmt` and `fatih/color`
-- Debug mode (`--debug`) logs truncated request/response bodies
-
-### Binary Name
-- Module name: `coragent`
-- Binary name: `coragent` (configured in .goreleaser.yaml)
 
 ## Testing Patterns
 
-- Standard `testing.T` (no external test frameworks)
-- Use `t.TempDir()` for file I/O tests
-- Integration tests require Snowflake credentials and build tag: `-tags=integration`
-
-## Common Tasks
-
-### Adding a New CLI Command
-
-1. Create new file in `internal/cli/` (e.g., `mycommand.go`)
-2. Define command using `&cobra.Command{}`
-3. Register in `internal/cli/root.go` via `rootCmd.AddCommand()`
-
-### Modifying AgentSpec
-
-1. Update structs in `internal/agent/agent.go`
-2. Ensure YAML tags are correct
-3. Update diff logic if needed in `internal/diff/diff.go`
-4. Add tests in corresponding `_test.go` files
-
-### Adding API Functionality
-
-1. Add methods to `internal/api/client.go`
-2. Handle response parsing (API returns nested JSON structures)
-3. Use existing identifier escaping functions
-
-## CI/CD
-
-- **CI:** Runs on push to main and PRs (`go vet`, `go test`)
-- **Release:** Triggered by git tags (`v*`), uses GoReleaser
-
-## Files to Avoid Editing
-
-- `go.sum` - Auto-generated by Go modules
-- Binary files in release artifacts
+- **Framework:** Standard `testing.T` — no external test libraries
+- **File I/O:** `t.TempDir()` for temporary directories
+- **Mocking:** `internal/regression/mock.go` implements all service interfaces
+- **Integration tests:** Build tag `integration`, require Snowflake credentials
+- **Coverage target:** 40% minimum (enforced in CI)
