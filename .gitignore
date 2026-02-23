@@ -49,7 +49,7 @@ dist/
 *~
 
 # Claude Code
-.claude/
+.claude/settings.local.json
 
 # Go build cache
 .gocache/
