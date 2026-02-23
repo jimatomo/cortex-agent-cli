@@ -1,5 +1,5 @@
 ---
-description: フィードバックを分析してエージェントの改善案を提案し、承認があれば YAML を修正して apply する
+description: Analyze feedback to propose improvements to an agent, and apply changes to the YAML upon approval
 allowed-tools:
   - Bash
   - Read
@@ -17,100 +17,100 @@ Parse the arguments from: `$ARGUMENTS`
 
 ## Steps
 
-### Step 1: フィードバック収集
+### Step 1: Collect Feedback
 
-引数から `<agent-name>`、`-d`/`--database`、`-s`/`--schema`、`--limit` を抽出して使用する。
-`-d` / `-s` が指定されていない場合はオプションを省略して実行する（デフォルト接続設定が使われる）。
+Extract `<agent-name>`, `-d`/`--database`, `-s`/`--schema`, and `--limit` from the arguments.
+If `-d` / `-s` are not specified, omit those options (the default connection settings will be used).
 
-> **Note**: `feedback` コマンドはローカルキャッシュ（`~/.coragent/feedback/<agent>.json`）を使用する。
-> チェック済みのレコードはデフォルトでは表示されない。
-> **データ取得には必ず `--json` を付けること**（インタラクティブなプロンプトをスキップし、構造化 JSON を取得するため）。
+> **Note**: The `feedback` command uses a local cache (`~/.coragent/feedback/<agent>.json`).
+> Checked records are not shown by default.
+> **Always include `--json`** when fetching data to skip interactive prompts and get structured JSON.
 
-まず全フィードバック（チェック済み含む・全センチメント）の件数を確認する：
+First, check the total count of all feedback (including checked, all sentiments):
 
 ```bash
 coragent feedback <agent-name> [--database DB] [--schema SCHEMA] --all --include-checked --json [--limit N]
 ```
 
-次に未チェックのネガティブフィードバックを取得する（改善分析に使用）：
+Then fetch unchecked negative feedback (used for improvement analysis):
 
 ```bash
 coragent feedback <agent-name> [--database DB] [--schema SCHEMA] --json [--limit N]
 ```
 
-取得した JSON を解析して `sentiment`、`comment`、`question`、`response` を読み取る。
-未チェックのネガティブフィードバックが 0 件の場合は「現時点では改善提案に必要なフィードバックがありません。」と伝えて処理を終了する。
+Parse the returned JSON to read `sentiment`, `comment`, `question`, and `response`.
+If there are 0 unchecked negative feedback entries, inform the user that there is no feedback available for improvement proposals at this time, and stop.
 
-### Step 2: 現在のエージェントスペックの取得
+### Step 2: Retrieve the Current Agent Spec
 
-Glob で `**/*.yml` と `**/*.yaml` を検索し、ローカルに `<agent-name>` に対応する YAML ファイルが存在するか確認する。
+Use Glob to search for `**/*.yml` and `**/*.yaml` and check whether a local YAML file matching `<agent-name>` exists.
 
-- **ローカルファイルがある場合**: `Read` でそのファイルを読み込む。ファイルパスを記録しておく。
-- **ローカルファイルがない場合**: `coragent export <agent-name> [--database DB] [--schema SCHEMA]` でリモートから取得してスペック内容を確認する。この時点ではファイルは作成しない。
+- **If a local file exists**: Load it with `Read`. Record the file path.
+- **If no local file exists**: Retrieve the spec from the remote using `coragent export <agent-name> [--database DB] [--schema SCHEMA]`. Do not create a file at this point.
 
-### Step 3: 改善案の分析・提案
+### Step 3: Analyze and Propose Improvements
 
-収集したフィードバックとエージェントスペックを照合し、以下を分析・提案する：
+Cross-reference the collected feedback with the agent spec and analyze/propose the following:
 
-1. **フィードバックのパターン分類**
-   - 回答精度の問題（誤った情報、不完全な回答）
-   - スコープ外の質問への対応
-   - 応答スタイルの問題（長すぎる/短すぎる、わかりにくい）
-   - その他のカテゴリ
+1. **Feedback pattern classification**
+   - Answer accuracy issues (incorrect information, incomplete responses)
+   - Handling of out-of-scope questions
+   - Response style issues (too long / too short, unclear)
+   - Other categories
 
-2. **エージェントスペックの改善ポイント**（特に `instructions` セクション）
-   - 現状の `instructions` の課題
-   - 追記・修正すべき内容
+2. **Improvement points in the agent spec** (especially the `instructions` section)
+   - Issues with the current `instructions`
+   - Content that should be added or revised
 
-3. **具体的な修正案**
-   - before/after で `instructions` の変更内容を明示する
+3. **Concrete change proposals**
+   - Clearly show the changes to `instructions` in before/after format
 
-フィードバックが存在しても、スペック修正によって解決できない問題（例：データソースの不足）は、修正提案の対象外とし、別途コメントとして伝える。
+Even if feedback exists, issues that cannot be resolved by spec changes (e.g., missing data sources) should be excluded from the change proposals and communicated separately as comments.
 
-### Step 4: YAML 修正の許可取得
+### Step 4: Request Permission to Modify the YAML
 
-スペック修正が効果的と判断した場合、`AskUserQuestion` でユーザーに許可を求める。
+If spec changes are deemed effective, use `AskUserQuestion` to request the user's approval.
 
-提示する情報：
-- 修正箇所（例：`instructions` の何行目付近）
-- before（修正前）
-- after（修正後）
+Information to present:
+- What is being changed (e.g., around which lines of `instructions`)
+- Before (original)
+- After (proposed)
 
-選択肢には必ず「修正しない」を含める。
+Always include a "Do not modify" option in the choices.
 
-### Step 5: YAML ファイルの修正（承認時のみ）
+### Step 5: Modify the YAML File (Only Upon Approval)
 
-ユーザーが修正を承認した場合：
+If the user approves the changes:
 
-1. **ローカルファイルが存在する場合**: `Edit` ツールで直接修正する。
-2. **ローカルファイルが存在しない場合**: まず export してファイルを生成する：
+1. **If a local file exists**: Modify it directly using the `Edit` tool.
+2. **If no local file exists**: First export the file:
    ```bash
    coragent export <agent-name> [--database DB] [--schema SCHEMA] --out <agent-name>.yml
    ```
-   その後 `Edit` ツールで修正する。
+   Then modify it using the `Edit` tool.
 
-修正後、変更内容を改めて表示する。
+After editing, display the changes again.
 
-### Step 6: apply の実行許可取得と実行
+### Step 6: Request Permission to Run Apply
 
-YAML 修正後、`AskUserQuestion` で apply を実行するか確認する。
+After modifying the YAML, use `AskUserQuestion` to confirm whether to run apply.
 
-承認された場合、以下を実行する：
+If approved, run:
 
 ```bash
 coragent apply <path-to-yaml> [--database DB] [--schema SCHEMA]
 ```
 
-apply が成功したら完了を伝える。
+Notify the user when apply succeeds.
 
-### Step 7: フィードバックをチェック済みにする
+### Step 7: Mark Feedback as Checked
 
-`AskUserQuestion` で、今回分析したフィードバックをチェック済みにするか確認する。
+Use `AskUserQuestion` to confirm whether to mark the analyzed feedback as checked.
 
-承認された場合、以下を実行する（`-y` で確認プロンプトを自動スキップ）：
+If approved, run the following (`-y` auto-skips the confirmation prompt):
 
 ```bash
 coragent feedback <agent-name> [--database DB] [--schema SCHEMA] -y
 ```
 
-これにより、今回レビューした未チェックのネガティブフィードバックが全てチェック済みになり、次回の `feedback` / `improve` 実行時には表示されなくなる。
+This marks all unchecked negative feedback reviewed in this session as checked, so it will not appear in future `feedback` / `improve` runs.
