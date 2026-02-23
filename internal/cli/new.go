@@ -73,11 +73,11 @@ func runNew() error {
 	fmt.Println("Mode:")
 	fmt.Println("  1) Full    - configure all fields")
 	fmt.Println("  2) Minimum - name, tools only")
-	modeChoice, err := promptWithDefault("Choose [1/2]", "1")
+	modeChoice, err := promptChoice("Choose [1/2]", 1, 2, 1)
 	if err != nil {
 		return err
 	}
-	minimumMode := strings.TrimSpace(modeChoice) == "2"
+	minimumMode := modeChoice == 2
 	fmt.Println()
 
 	// --- Output file ---
@@ -179,14 +179,12 @@ func runNew() error {
 					fmt.Printf("  %2d) %-14s", i+1, label)
 				}
 			}
-			avatarChoice, err := promptWithDefault("Choose [1-20] (optional, Enter to skip)", "")
+			avatarIdx, avatarChosen, err := promptOptionalChoice(fmt.Sprintf("Choose [1-%d] (optional, Enter to skip)", len(avatarOptions)), 1, len(avatarOptions))
 			if err != nil {
 				return err
 			}
-			if avatarChoice != "" {
-				if idx, convErr := strconv.Atoi(strings.TrimSpace(avatarChoice)); convErr == nil && idx >= 1 && idx <= len(avatarOptions) {
-					profile.Avatar = avatarOptions[idx-1]
-				}
+			if avatarChosen {
+				profile.Avatar = avatarOptions[avatarIdx-1]
 			}
 
 			// Color selection
@@ -196,14 +194,12 @@ func runNew() error {
 				colorLabels = append(colorLabels, fmt.Sprintf("%d) %s", i+1, co.label))
 			}
 			fmt.Printf("  %s\n", strings.Join(colorLabels, "   "))
-			colorChoice, err := promptWithDefault("Choose [1-6] (optional, Enter to skip)", "")
+			colorIdx, colorChosen, err := promptOptionalChoice(fmt.Sprintf("Choose [1-%d] (optional, Enter to skip)", len(colorOptions)), 1, len(colorOptions))
 			if err != nil {
 				return err
 			}
-			if colorChoice != "" {
-				if idx, convErr := strconv.Atoi(strings.TrimSpace(colorChoice)); convErr == nil && idx >= 1 && idx <= len(colorOptions) {
-					profile.Color = colorOptions[idx-1].value
-				}
+			if colorChosen {
+				profile.Color = colorOptions[colorIdx-1].value
 			}
 
 			if profile.DisplayName != "" || profile.Avatar != "" || profile.Color != "" {
@@ -324,11 +320,11 @@ func runNew() error {
 		fmt.Println("    1) cortex_analyst_text_to_sql")
 		fmt.Println("    2) cortex_search")
 		fmt.Println("    3) Skip / add later")
-		toolTypeChoice, err := promptWithDefault("Choose [1/2/3]", "3")
+		toolTypeChoice, err := promptChoice("Choose [1/2/3]", 1, 3, 3)
 		if err != nil {
 			return err
 		}
-		if strings.TrimSpace(toolTypeChoice) == "3" || strings.TrimSpace(toolTypeChoice) == "" {
+		if toolTypeChoice == 3 {
 			break
 		}
 
@@ -354,8 +350,8 @@ func runNew() error {
 
 		resource := map[string]any{}
 
-		switch strings.TrimSpace(toolTypeChoice) {
-		case "2":
+		switch toolTypeChoice {
+		case 2:
 			toolSpec["type"] = "cortex_search"
 
 			searchService, err := promptWithDefault("Search service (e.g., DB.SCHEMA.SERVICE_NAME)", "")
@@ -460,6 +456,48 @@ func runNew() error {
 	}
 	fmt.Printf("Done! Run 'coragent validate %s' to verify.\n", outFile)
 	return nil
+}
+
+// promptChoice loops until the user enters a number in [min, max] or presses
+// Enter to accept defaultVal.
+func promptChoice(label string, min, max, defaultVal int) (int, error) {
+	for {
+		ans, err := promptWithDefault(label, strconv.Itoa(defaultVal))
+		if err != nil {
+			return 0, err
+		}
+		ans = strings.TrimSpace(ans)
+		if ans == "" {
+			return defaultVal, nil
+		}
+		n, convErr := strconv.Atoi(ans)
+		if convErr != nil || n < min || n > max {
+			fmt.Printf("  Please enter a number between %d and %d.\n", min, max)
+			continue
+		}
+		return n, nil
+	}
+}
+
+// promptOptionalChoice loops until the user enters a number in [min, max] or
+// presses Enter to skip. Returns (0, false, nil) when skipped.
+func promptOptionalChoice(label string, min, max int) (int, bool, error) {
+	for {
+		ans, err := promptWithDefault(label, "")
+		if err != nil {
+			return 0, false, err
+		}
+		ans = strings.TrimSpace(ans)
+		if ans == "" {
+			return 0, false, nil
+		}
+		n, convErr := strconv.Atoi(ans)
+		if convErr != nil || n < min || n > max {
+			fmt.Printf("  Please enter a number between %d and %d, or press Enter to skip.\n", min, max)
+			continue
+		}
+		return n, true, nil
+	}
 }
 
 // readMultilinePrompt reads lines of input until the user enters an empty line.
