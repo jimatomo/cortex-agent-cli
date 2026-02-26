@@ -150,3 +150,53 @@ func TestLoadCoragentConfig_NoFile(t *testing.T) {
 		t.Errorf("expected empty string, got %q", cfg.Eval.OutputDir)
 	}
 }
+
+func TestLoadCoragentConfig_FeedbackRemote(t *testing.T) {
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origDir) })
+	os.Chdir(dir)
+
+	content := `[feedback.remote]
+enabled = true
+database = "MY_DB"
+schema = "MY_SCHEMA"
+table = "AGENT_FEEDBACK"
+`
+	os.WriteFile(filepath.Join(dir, ".coragent.toml"), []byte(content), 0o644)
+
+	cfg := LoadCoragentConfig()
+	if !cfg.Feedback.Remote.Enabled {
+		t.Error("expected Feedback.Remote.Enabled to be true")
+	}
+	if cfg.Feedback.Remote.Database != "MY_DB" {
+		t.Errorf("expected database MY_DB, got %q", cfg.Feedback.Remote.Database)
+	}
+	if cfg.Feedback.Remote.Schema != "MY_SCHEMA" {
+		t.Errorf("expected schema MY_SCHEMA, got %q", cfg.Feedback.Remote.Schema)
+	}
+	if cfg.Feedback.Remote.Table != "AGENT_FEEDBACK" {
+		t.Errorf("expected table AGENT_FEEDBACK, got %q", cfg.Feedback.Remote.Table)
+	}
+}
+
+func TestLoadCoragentConfig_FeedbackRemoteDefault(t *testing.T) {
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origDir) })
+	os.Chdir(dir)
+
+	content := `[eval]
+output_dir = "./out"
+`
+	os.WriteFile(filepath.Join(dir, ".coragent.toml"), []byte(content), 0o644)
+
+	cfg := LoadCoragentConfig()
+	if cfg.Feedback.Remote.Enabled {
+		t.Error("expected Feedback.Remote.Enabled to be false by default")
+	}
+	if cfg.Feedback.Remote.Database != "" || cfg.Feedback.Remote.Schema != "" || cfg.Feedback.Remote.Table != "" {
+		t.Errorf("expected empty feedback.remote db/schema/table by default, got %q/%q/%q",
+			cfg.Feedback.Remote.Database, cfg.Feedback.Remote.Schema, cfg.Feedback.Remote.Table)
+	}
+}

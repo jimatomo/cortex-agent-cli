@@ -429,6 +429,12 @@ timestamp_suffix = true            # append UTC timestamp to output filenames
 judge_model = "llama4-scout"       # LLM model for response scoring (default: llama4-scout)
 response_score_threshold = 70      # minimum score to pass (0 = no threshold)
 ignore_tools = ["another_utility"] # additional tools to exclude from eval (data_to_chart excluded by default)
+
+[feedback.remote]
+enabled = true                     # persist feedback and checked state to a Snowflake table
+database = "MY_DB"                 # database for the feedback table
+schema = "MY_SCHEMA"               # schema for the feedback table
+table = "AGENT_FEEDBACK"           # table name (created by feedback --init if missing)
 ```
 
 ## Eval
@@ -567,7 +573,9 @@ coragent threads --delete 29864464   # delete a specific thread by ID
 Retrieve user feedback events for a Cortex Agent from `SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS`.
 Events with `RECORD:name = 'CORTEX_AGENT_FEEDBACK'` are fetched and displayed, ordered by timestamp descending.
 
-Records are cached locally at `~/.coragent/feedback/<agent-name>.json`. Records are shown **one at a time** and after each one you are prompted to mark it as **checked**; checked records are hidden on subsequent runs, letting you work through feedback incrementally. Progress is saved after each confirmation, so you can quit mid-way and resume later.
+**Storage:** By default, records are cached locally at `~/.coragent/feedback/<agent-name>.json`. If `[feedback.remote]` is enabled in config, feedback and checked state are stored in the configured Snowflake table instead (same role must have privileges on that table and on `SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS`).
+
+Records are shown **one at a time** and after each one you are prompted to mark it as **checked**; checked records are hidden on subsequent runs. Progress is saved after each confirmation (locally or in the remote table, depending on config).
 
 By default, only negative feedback is shown. Use `--all` to show all feedback.
 
@@ -592,6 +600,9 @@ coragent feedback my-agent --no-tools
 
 # JSON output (no check prompt)
 coragent feedback my-agent --json | jq .
+
+# Ensure remote feedback table exists (when feedback.remote.enabled); create if missing
+coragent feedback --init
 ```
 
 ### Feedback Flags
@@ -604,6 +615,12 @@ coragent feedback my-agent --json | jq .
 | `-y`, `--yes` | Auto-confirm marking each record as checked |
 | `--include-checked` | Also show already-checked records (marked with `[✓]`) |
 | `--no-tools` | Hide tool invocation details (Tools, Query, SQL) |
+| `--init` | Ensure the remote feedback table exists (create if missing); requires `[feedback.remote]` in config |
+| `--clear` | Clear feedback state for the agent and exit (local cache in local mode, remote rows in remote mode) |
+
+### Remote feedback table
+
+When `[feedback.remote]` is enabled in `.coragent.toml` or `~/.coragent/config.toml`, run `coragent feedback --init` once to create the table if it does not exist. The table stores raw feedback payload (`raw_value`) and raw request payload (`request_raw`), flattened columns (sentiment, comment, question, response, tool_uses, etc.), and a `checked` flag with `checked_at` timestamp. If the table already exists, `feedback --init` prompts for confirmation before running `CREATE OR REPLACE TABLE` (which recreates the table and drops existing rows). The role must have `CREATE TABLE` (for `--init`) and `INSERT`/`UPDATE`/`SELECT`/`DELETE` on the target database and schema.
 
 ### Requirements
 

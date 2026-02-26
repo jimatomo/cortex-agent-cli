@@ -26,6 +26,27 @@ func TestEscapeSQLString(t *testing.T) {
 	}
 }
 
+func TestEscapeSQLJSONString(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"plain", `{"a":"b"}`, `{"a":"b"}`},
+		{"single quote", `{"text":"it's ok"}`, `{"text":"it''s ok"}`},
+		{"escaped newline", `{"sql":"SELECT 1\nFROM dual"}`, `{"sql":"SELECT 1\\nFROM dual"}`},
+		{"escaped quote", `{"text":"\"hello\""}`, `{"text":"\\"hello\\""}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := escapeSQLJSONString(tt.input)
+			if got != tt.want {
+				t.Errorf("escapeSQLJSONString(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseSnowflakeTimestamp(t *testing.T) {
 	tests := []struct {
 		name string
@@ -33,10 +54,12 @@ func TestParseSnowflakeTimestamp(t *testing.T) {
 		want string // partial match check
 	}{
 		{"valid epoch", "1700000000.000000000", "2023"},
+		{"timestamp_tz epoch with tz token", "1771563530.421000000 1980", "2026"},
 		{"not numeric", "not-a-number", "not-a-number"},
 		{"empty", "", ""},
 		{"zero", "0.000000000", "1970"},
 		{"fractional seconds", "1700000000.500000000", "2023"},
+		{"rfc3339", "2026-02-20T13:58:50.421Z", "2026-02-20 13:58:50.421 UTC"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -56,9 +79,9 @@ func TestParseSnowflakeTimestamp(t *testing.T) {
 
 func TestExtractQuestion(t *testing.T) {
 	tests := []struct {
-		name  string
-		json  string
-		want  string
+		name string
+		json string
+		want string
 	}{
 		{
 			name: "valid request with user message",
@@ -81,14 +104,14 @@ func TestExtractQuestion(t *testing.T) {
 			want: "",
 		},
 		{
-			name:  "invalid json",
-			json:  "not json",
-			want:  "",
+			name: "invalid json",
+			json: "not json",
+			want: "",
 		},
 		{
-			name:  "empty string",
-			json:  "",
-			want:  "",
+			name: "empty string",
+			json: "",
+			want: "",
 		},
 		{
 			name: "missing request body key",
@@ -138,14 +161,14 @@ func TestExtractResponse(t *testing.T) {
 			want: "answer",
 		},
 		{
-			name:  "invalid json",
-			json:  "not json",
-			want:  "",
+			name: "invalid json",
+			json: "not json",
+			want: "",
 		},
 		{
-			name:  "empty string",
-			json:  "",
-			want:  "",
+			name: "empty string",
+			json: "",
+			want: "",
 		},
 		{
 			name: "missing response key",
@@ -251,19 +274,19 @@ func TestExtractResponseTimeMs(t *testing.T) {
 			want: 1234,
 		},
 		{
-			name:  "missing key",
-			json:  `{"other_key":100}`,
-			want:  0,
+			name: "missing key",
+			json: `{"other_key":100}`,
+			want: 0,
 		},
 		{
-			name:  "invalid json",
-			json:  "not json",
-			want:  0,
+			name: "invalid json",
+			json: "not json",
+			want: 0,
 		},
 		{
-			name:  "empty string",
-			json:  "",
-			want:  0,
+			name: "empty string",
+			json: "",
+			want: 0,
 		},
 		{
 			name: "zero",

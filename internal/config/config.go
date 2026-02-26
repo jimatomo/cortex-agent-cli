@@ -10,7 +10,22 @@ import (
 
 // CoragentConfig represents the top-level structure of .coragent.toml.
 type CoragentConfig struct {
-	Eval EvalSettings `toml:"eval"`
+	Eval     EvalSettings     `toml:"eval"`
+	Feedback FeedbackSettings `toml:"feedback"`
+}
+
+// FeedbackSettings holds feedback-related configuration.
+type FeedbackSettings struct {
+	Remote FeedbackRemoteSettings `toml:"remote"`
+}
+
+// FeedbackRemoteSettings configures Snowflake table persistence for feedback.
+// When enabled, feedback records and checked state are stored in the given table.
+type FeedbackRemoteSettings struct {
+	Enabled  bool   `toml:"enabled"`
+	Database string `toml:"database"`
+	Schema   string `toml:"schema"`
+	Table    string `toml:"table"`
 }
 
 // EvalSettings holds eval-specific configuration.

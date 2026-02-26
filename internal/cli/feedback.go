@@ -12,6 +12,8 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
+	"coragent/internal/api"
+	"coragent/internal/config"
 	"coragent/internal/feedbackcache"
 )
 
@@ -23,9 +25,10 @@ func newFeedbackCmd(opts *RootOptions) *cobra.Command {
 	var includeChecked bool
 	var noTools bool
 	var clearCache bool
+	var initTable bool
 
 	cmd := &cobra.Command{
-		Use:   "feedback <agent-name>",
+		Use:   "feedback [agent-name]",
 		Short: "Show user feedback for a Cortex Agent",
 		Long: `Retrieve user feedback events for a Cortex Agent from observability data.
 
@@ -48,12 +51,58 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
   coragent feedback my-agent --include-checked
 
   # JSON output
-  coragent feedback my-agent --json | jq .`,
-		Args: cobra.ExactArgs(1),
+  coragent feedback my-agent --json | jq .
+
+  # Ensure remote feedback table exists (when feedback.remote.enabled in config)
+  coragent feedback --init`,
+		Args: func(cmd *cobra.Command, args []string) error {
+			initMode, err := cmd.Flags().GetBool("init")
+			if err != nil {
+				return err
+			}
+			if initMode {
+				return cobra.MaximumNArgs(1)(cmd, args)
+			}
+			return cobra.ExactArgs(1)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			appCfg := config.LoadCoragentConfig()
+			remoteDb, remoteSchema, remoteTable := resolveFeedbackRemote(appCfg)
+			useRemote := appCfg.Feedback.Remote.Enabled && remoteDb != "" && remoteSchema != "" && remoteTable != ""
+
+			if initTable {
+				return runFeedbackInit(cmd, opts, appCfg)
+			}
 			agentName := args[0]
 
 			if clearCache {
+				if useRemote {
+					client, _, err := buildClientAndCfg(opts)
+					if err != nil {
+						return err
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					exists, err := client.FeedbackTableExists(ctx, remoteDb, remoteSchema, remoteTable)
+					if err != nil {
+						return fmt.Errorf("check remote feedback table: %w", err)
+					}
+					if !exists {
+						return UserErr(fmt.Errorf(
+							"remote feedback table %s.%s.%s not found; run `coragent feedback --init` first",
+							remoteDb, remoteSchema, remoteTable,
+						))
+					}
+					if err := client.ClearFeedbackForAgent(ctx, remoteDb, remoteSchema, remoteTable, agentName); err != nil {
+						return fmt.Errorf("clear remote feedback records: %w", err)
+					}
+					fmt.Fprintf(
+						cmd.OutOrStdout(),
+						"Remote feedback records cleared for agent %q in %s.%s.%s.\n",
+						agentName, remoteDb, remoteSchema, remoteTable,
+					)
+					return nil
+				}
 				path, err := feedbackcache.CachePath(agentName)
 				if err != nil {
 					return err
@@ -82,35 +131,58 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
-			// 1. Fetch fresh records from Snowflake.
-			fresh, err := client.GetFeedback(ctx, target.Database, target.Schema, agentName)
-			if err != nil {
-				return err
-			}
-
-			// 2. Load cache → merge → save.
-			cache, err := feedbackcache.Load(agentName)
-			if err != nil {
-				return fmt.Errorf("load feedback cache: %w", err)
-			}
-			cache.Merge(fresh)
-			if err := feedbackcache.Save(agentName, cache); err != nil {
-				return fmt.Errorf("save feedback cache: %w", err)
-			}
-
-			// 3. Select records to display.
 			var toShow []feedbackcache.Record
-			if includeChecked {
-				toShow = cache.Records
+			var cache *feedbackcache.Cache
+			if useRemote {
+				exists, err := client.FeedbackTableExists(ctx, remoteDb, remoteSchema, remoteTable)
+				if err != nil {
+					return fmt.Errorf("check remote feedback table: %w", err)
+				}
+				if !exists {
+					return UserErr(fmt.Errorf(
+						"remote feedback table %s.%s.%s not found; run `coragent feedback %s --init` first",
+						remoteDb, remoteSchema, remoteTable, agentName,
+					))
+				}
+
+				// 1. Sync directly from observability events into remote table.
+				if err := client.SyncFeedbackFromEventsToTable(ctx, target.Database, target.Schema, agentName, remoteDb, remoteSchema, remoteTable); err != nil {
+					return fmt.Errorf("sync feedback to remote table: %w", err)
+				}
+				// 2. Load records with checked state from remote table.
+				rows, err := client.GetFeedbackFromTable(ctx, remoteDb, remoteSchema, remoteTable, agentName)
+				if err != nil {
+					return fmt.Errorf("load feedback from remote table: %w", err)
+				}
+				toShow = mergeRemoteRows(rows, includeChecked, nil)
 			} else {
-				for _, r := range cache.Records {
-					if !r.Checked {
-						toShow = append(toShow, r)
+				// 1. Fetch fresh records from Snowflake.
+				fresh, err := client.GetFeedback(ctx, target.Database, target.Schema, agentName)
+				if err != nil {
+					return err
+				}
+				// 2. Load cache → merge → save.
+				cache, err = feedbackcache.Load(agentName)
+				if err != nil {
+					return fmt.Errorf("load feedback cache: %w", err)
+				}
+				cache.Merge(fresh)
+				if err := feedbackcache.Save(agentName, cache); err != nil {
+					return fmt.Errorf("save feedback cache: %w", err)
+				}
+				// 3. Select records to display.
+				if includeChecked {
+					toShow = cache.Records
+				} else {
+					for _, r := range cache.Records {
+						if !r.Checked {
+							toShow = append(toShow, r)
+						}
 					}
 				}
 			}
 
-			// 4. Apply sentiment filter (--all) and --limit.
+			// Apply sentiment filter (--all) and --limit.
 			if !showAll {
 				var filtered []feedbackcache.Record
 				for _, r := range toShow {
@@ -179,15 +251,21 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 				}
 
 				if confirm {
-					// Update in cache and save immediately so partial progress is kept.
-					for j := range cache.Records {
-						if cache.Records[j].RecordID == r.RecordID {
-							cache.Records[j].Checked = true
-							break
+					if useRemote {
+						if err := client.UpdateFeedbackChecked(ctx, remoteDb, remoteSchema, remoteTable, r.RecordID, true); err != nil {
+							return fmt.Errorf("update checked in remote table: %w", err)
 						}
-					}
-					if err := feedbackcache.Save(agentName, cache); err != nil {
-						return fmt.Errorf("save feedback cache: %w", err)
+						toShow[i].Checked = true
+					} else {
+						for j := range cache.Records {
+							if cache.Records[j].RecordID == r.RecordID {
+								cache.Records[j].Checked = true
+								break
+							}
+						}
+						if err := feedbackcache.Save(agentName, cache); err != nil {
+							return fmt.Errorf("save feedback cache: %w", err)
+						}
 					}
 					markedCount++
 				}
@@ -211,9 +289,93 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Auto-confirm marking each record as checked")
 	cmd.Flags().BoolVar(&includeChecked, "include-checked", false, "Also show already-checked records")
 	cmd.Flags().BoolVar(&noTools, "no-tools", false, "Hide tool invocation details (Tools, Query, SQL)")
-	cmd.Flags().BoolVar(&clearCache, "clear", false, "Delete the local feedback cache for the agent and exit")
+	cmd.Flags().BoolVar(&clearCache, "clear", false, "Clear feedback state for the agent and exit (local cache or remote table)")
+	cmd.Flags().BoolVar(&initTable, "init", false, "Ensure the remote feedback table exists (create if missing); requires feedback.remote in config")
 
 	return cmd
+}
+
+// resolveFeedbackRemote returns database, schema, table from config for remote feedback storage.
+func resolveFeedbackRemote(appCfg config.CoragentConfig) (db, schema, table string) {
+	r := appCfg.Feedback.Remote
+	return strings.TrimSpace(r.Database), strings.TrimSpace(r.Schema), strings.TrimSpace(r.Table)
+}
+
+// runFeedbackInit ensures the remote feedback table exists; creates it if missing.
+func runFeedbackInit(cmd *cobra.Command, opts *RootOptions, appCfg config.CoragentConfig) error {
+	db, schema, table := resolveFeedbackRemote(appCfg)
+	if !appCfg.Feedback.Remote.Enabled || db == "" || schema == "" || table == "" {
+		return UserErr(fmt.Errorf("feedback --init requires [feedback.remote] in config with enabled = true, database, schema, and table"))
+	}
+	client, _, err := buildClientAndCfg(opts)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	exists, err := client.FeedbackTableExists(ctx, db, schema, table)
+	if err != nil {
+		return fmt.Errorf("check feedback table: %w", err)
+	}
+	if exists {
+		fmt.Fprintf(
+			cmd.OutOrStdout(),
+			"Feedback table %s.%s.%s already exists. Recreate with CREATE OR REPLACE TABLE? This will drop existing rows. [y/N] ",
+			db, schema, table,
+		)
+		scanner := bufio.NewScanner(os.Stdin)
+		confirmed := false
+		if scanner.Scan() {
+			answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+			confirmed = answer == "y" || answer == "yes"
+		}
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("read confirmation: %w", err)
+		}
+		if !confirmed {
+			fmt.Fprintln(cmd.OutOrStdout(), "Skipped re-creating feedback table.")
+			return nil
+		}
+	}
+	if err := client.CreateFeedbackTable(ctx, db, schema, table); err != nil {
+		return fmt.Errorf("create feedback table: %w", err)
+	}
+	if exists {
+		fmt.Fprintf(cmd.OutOrStdout(), "Recreated feedback table %s.%s.%s.\n", db, schema, table)
+		return nil
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Created feedback table %s.%s.%s.\n", db, schema, table)
+	return nil
+}
+
+func mergeRemoteRows(rows []api.FeedbackTableRow, includeChecked bool, toolByRecord map[string][]api.ToolUseInfo) []feedbackcache.Record {
+	out := make([]feedbackcache.Record, 0, len(rows))
+	for _, row := range rows {
+		if fallback, ok := toolByRecord[row.RecordID]; ok {
+			needsFallback := len(row.ToolUses) == 0
+			if !needsFallback {
+				allMissingSQL := true
+				for _, tu := range row.ToolUses {
+					if tu.SQL != "" || tu.ToolStatus != "" {
+						allMissingSQL = false
+						break
+					}
+				}
+				needsFallback = allMissingSQL
+			}
+			if needsFallback {
+				row.ToolUses = fallback
+			}
+		}
+		if !includeChecked && row.Checked {
+			continue
+		}
+		out = append(out, feedbackcache.Record{
+			Checked:        row.Checked,
+			FeedbackRecord: row.FeedbackRecord,
+		})
+	}
+	return out
 }
 
 // printOneRecord prints a single feedback record with its index out of total.
@@ -274,11 +436,7 @@ func printOneRecord(cmd *cobra.Command, idx, total int, r feedbackcache.Record, 
 	}
 	if !noTools {
 		if len(r.ToolUses) > 0 {
-			var toolParts []string
-			for _, tu := range r.ToolUses {
-				toolParts = append(toolParts, tu.ToolType)
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "      Tools:     %s\n", strings.Join(toolParts, " → "))
+			fmt.Fprintf(cmd.OutOrStdout(), "      Tools:     %s\n", formatToolChain(r.ToolUses))
 			const subIndent = "         " // 9 spaces (3 deeper than top-level fields)
 			for i, tu := range r.ToolUses {
 				if tu.ToolType == "cortex_analyst_text_to_sql" && tu.Query != "" {
@@ -305,6 +463,23 @@ func printOneRecord(cmd *cobra.Command, idx, total int, r feedbackcache.Record, 
 	}
 
 	fmt.Fprintln(cmd.OutOrStdout())
+}
+
+func formatToolChain(toolUses []api.ToolUseInfo) string {
+	parts := make([]string, 0, len(toolUses))
+	for _, tu := range toolUses {
+		toolType := strings.TrimSpace(tu.ToolType)
+		toolName := strings.TrimSpace(tu.ToolName)
+		switch {
+		case toolType != "" && toolName != "":
+			parts = append(parts, fmt.Sprintf("%s (%s)", toolType, toolName))
+		case toolName != "":
+			parts = append(parts, toolName)
+		default:
+			parts = append(parts, toolType)
+		}
+	}
+	return strings.Join(parts, " → ")
 }
 
 func feedbackUserDisplay(name string) string {
