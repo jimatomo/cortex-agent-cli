@@ -587,7 +587,7 @@ coragent feedback my-agent --include-checked
 # Limit results
 coragent feedback my-agent --limit 20
 
-# Hide tool invocation details (Query, SQL, RespTime)
+# Hide tool invocation details (Tools, Query, SQL)
 coragent feedback my-agent --no-tools
 
 # JSON output (no check prompt)

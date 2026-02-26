@@ -210,7 +210,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON array")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Auto-confirm marking each record as checked")
 	cmd.Flags().BoolVar(&includeChecked, "include-checked", false, "Also show already-checked records")
-	cmd.Flags().BoolVar(&noTools, "no-tools", false, "Hide tool invocation details (Query, SQL, RespTime)")
+	cmd.Flags().BoolVar(&noTools, "no-tools", false, "Hide tool invocation details (Tools, Query, SQL)")
 	cmd.Flags().BoolVar(&clearCache, "clear", false, "Delete the local feedback cache for the agent and exit")
 
 	return cmd
