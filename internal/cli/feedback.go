@@ -145,8 +145,12 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 					))
 				}
 
-				// 1. Sync directly from observability events into remote table.
-				if err := client.SyncFeedbackFromEventsToTable(ctx, target.Database, target.Schema, agentName, remoteDb, remoteSchema, remoteTable); err != nil {
+				// 1. Get latest event_ts from remote table for diff sync.
+				since, err := client.GetLatestFeedbackEventTs(ctx, remoteDb, remoteSchema, remoteTable, agentName)
+				if err != nil {
+					return fmt.Errorf("get latest feedback timestamp: %w", err)
+				}
+				if err := client.SyncFeedbackFromEventsToTable(ctx, target.Database, target.Schema, agentName, remoteDb, remoteSchema, remoteTable, since); err != nil {
 					return fmt.Errorf("sync feedback to remote table: %w", err)
 				}
 				// 2. Load records with checked state from remote table.
@@ -156,15 +160,16 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 				}
 				toShow = mergeRemoteRows(rows, includeChecked, nil)
 			} else {
-				// 1. Fetch fresh records from Snowflake.
-				fresh, err := client.GetFeedback(ctx, target.Database, target.Schema, agentName)
-				if err != nil {
-					return err
-				}
-				// 2. Load cache → merge → save.
+				// 1. Load cache and determine since (latest timestamp) for diff fetch.
 				cache, err = feedbackcache.Load(agentName)
 				if err != nil {
 					return fmt.Errorf("load feedback cache: %w", err)
+				}
+				since := cache.LatestTimestamp()
+				// 2. Fetch only new records from Snowflake (since cache latest).
+				fresh, err := client.GetFeedback(ctx, target.Database, target.Schema, agentName, since)
+				if err != nil {
+					return err
 				}
 				cache.Merge(fresh)
 				if err := feedbackcache.Save(agentName, cache); err != nil {

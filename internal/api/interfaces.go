@@ -38,7 +38,7 @@ type GrantService interface {
 
 // QueryService defines the contract for SQL-based query operations.
 type QueryService interface {
-	GetFeedback(ctx context.Context, db, schema, agentName string) ([]FeedbackRecord, error)
+	GetFeedback(ctx context.Context, db, schema, agentName, since string) ([]FeedbackRecord, error)
 	CortexComplete(ctx context.Context, sqlStmt string) (string, error)
 }
 

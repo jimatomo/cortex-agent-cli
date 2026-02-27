@@ -92,6 +92,49 @@ func TestMerge_IncrementalGrowth(t *testing.T) {
 	}
 }
 
+func TestLatestTimestamp_Empty(t *testing.T) {
+	c := &feedbackcache.Cache{}
+	if got := c.LatestTimestamp(); got != "" {
+		t.Errorf("LatestTimestamp() = %q, want empty", got)
+	}
+}
+
+func TestLatestTimestamp_Single(t *testing.T) {
+	c := &feedbackcache.Cache{
+		Records: []feedbackcache.Record{
+			{FeedbackRecord: api.FeedbackRecord{RecordID: "r1", Timestamp: "2024-06-01 12:00:00.000 UTC"}}},
+	}
+	if got := c.LatestTimestamp(); got != "2024-06-01 12:00:00.000 UTC" {
+		t.Errorf("LatestTimestamp() = %q, want 2024-06-01 12:00:00.000 UTC", got)
+	}
+}
+
+func TestLatestTimestamp_Multiple(t *testing.T) {
+	c := &feedbackcache.Cache{
+		Records: []feedbackcache.Record{
+			{FeedbackRecord: api.FeedbackRecord{RecordID: "r1", Timestamp: "2024-06-01 10:00:00.000 UTC"}},
+			{FeedbackRecord: api.FeedbackRecord{RecordID: "r2", Timestamp: "2024-06-01 14:00:00.000 UTC"}},
+			{FeedbackRecord: api.FeedbackRecord{RecordID: "r3", Timestamp: "2024-06-01 12:00:00.000 UTC"}},
+		},
+	}
+	if got := c.LatestTimestamp(); got != "2024-06-01 14:00:00.000 UTC" {
+		t.Errorf("LatestTimestamp() = %q, want 2024-06-01 14:00:00.000 UTC", got)
+	}
+}
+
+func TestLatestTimestamp_SameTimestamp(t *testing.T) {
+	ts := "2024-06-01 12:00:00.000 UTC"
+	c := &feedbackcache.Cache{
+		Records: []feedbackcache.Record{
+			{FeedbackRecord: api.FeedbackRecord{RecordID: "r1", Timestamp: ts}},
+			{FeedbackRecord: api.FeedbackRecord{RecordID: "r2", Timestamp: ts}},
+		},
+	}
+	if got := c.LatestTimestamp(); got != ts {
+		t.Errorf("LatestTimestamp() = %q, want %q", got, ts)
+	}
+}
+
 func TestSaveAndLoad(t *testing.T) {
 	setHomeDir(t, t.TempDir())
 

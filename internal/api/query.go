@@ -81,6 +81,20 @@ func parseSnowflakeTimestamp(raw string) string {
 	return time.Unix(sec, nsec).UTC().Format("2006-01-02 15:04:05.000 UTC")
 }
 
+// sinceForSQL normalizes a UTC timestamp string (e.g. "2006-01-02 15:04:05.000 UTC")
+// to the form used in TO_TIMESTAMP_TZ with TZHTZM, to avoid double-quote escaping
+// issues when the SQL is sent via the REST API (e.g. "2006-01-02 15:04:05.000 +0000").
+func sinceForSQL(since string) string {
+	since = strings.TrimSpace(since)
+	if since == "" {
+		return ""
+	}
+	if strings.HasSuffix(since, " UTC") {
+		return strings.TrimSuffix(since, " UTC") + " +0000"
+	}
+	return since
+}
+
 // FeedbackRecord holds a single CORTEX_AGENT_FEEDBACK observability event.
 type FeedbackRecord struct {
 	RecordID       string        `json:"record_id"` // RECORD_ATTRIBUTES['ai.observability.record_id']
@@ -111,10 +125,18 @@ type ToolUseInfo struct {
 // CORTEX_AGENT_FEEDBACK events and returns them ordered by timestamp descending.
 // It LEFT JOINs the REQUEST events on ai.observability.record_id to include the
 // user's question and the agent's response alongside each feedback record.
-func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName string) ([]FeedbackRecord, error) {
+// If since is non-empty (UTC timestamp string, e.g. "2006-01-02 15:04:05.000 UTC"),
+// only events with f.TIMESTAMP >= since are returned.
+func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName, since string) ([]FeedbackRecord, error) {
 	dbEsc := escapeSQLString(unquoteIdentifier(db))
 	schemaEsc := escapeSQLString(unquoteIdentifier(schema))
 	agentEsc := escapeSQLString(agentName)
+
+	whereExtra := ""
+	if since != "" {
+		sinceEsc := escapeSQLString(sinceForSQL(since))
+		whereExtra = fmt.Sprintf(" AND f.TIMESTAMP >= TO_TIMESTAMP_TZ('%s', 'YYYY-MM-DD HH24:MI:SS.FF3 TZHTZM')", sinceEsc)
+	}
 
 	stmt := fmt.Sprintf(
 		"SELECT"+
@@ -130,9 +152,11 @@ func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName string) 
 			"     = r.RECORD_ATTRIBUTES['ai.observability.record_id']"+
 			"   AND r.RECORD:name = 'CORTEX_AGENT_REQUEST'"+
 			" WHERE f.RECORD:name = 'CORTEX_AGENT_FEEDBACK'"+
+			"%s"+
 			" ORDER BY f.TIMESTAMP DESC",
 		dbEsc, schemaEsc, agentEsc,
 		dbEsc, schemaEsc, agentEsc,
+		whereExtra,
 	)
 
 	payload := sqlStatementRequest{
@@ -775,20 +799,38 @@ VALUES (s.record_id, s.event_ts, s.agent_name, s.user_name, s.sentiment, s.comme
 
 // SyncFeedbackFromEventsToTable merges feedback rows directly from observability
 // events into the remote feedback table without Go-side row materialization.
-func (c *Client) SyncFeedbackFromEventsToTable(ctx context.Context, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable string) error {
+// If since is non-empty (UTC timestamp string, e.g. "2006-01-02 15:04:05.000 UTC"),
+// only events with f.TIMESTAMP >= since are synced.
+func (c *Client) SyncFeedbackFromEventsToTable(ctx context.Context, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable, since string) error {
 	dstFQ := fmt.Sprintf("%s.%s.%s",
 		identifierSegment(dstDB), identifierSegment(dstSchema), identifierSegment(dstTable))
 	srcDBEsc := escapeSQLString(unquoteIdentifier(srcDB))
 	srcSchemaEsc := escapeSQLString(unquoteIdentifier(srcSchema))
 	agentEsc := escapeSQLString(agentName)
 
+	srcWhereExtra := ""
+	if since != "" {
+		sinceEsc := escapeSQLString(sinceForSQL(since))
+		srcWhereExtra = fmt.Sprintf(" AND f.TIMESTAMP >= TO_TIMESTAMP_TZ('%s', 'YYYY-MM-DD HH24:MI:SS.FF3 TZHTZM')", sinceEsc)
+	}
+
 	stmt := fmt.Sprintf(
 		`MERGE INTO %s AS tgt
 USING (
-  WITH src AS (
+  WITH all_events AS (
+    SELECT
+      RECORD_ATTRIBUTES['ai.observability.record_id']::STRING AS raw_record_id,
+      RECORD:name::STRING AS event_name,
+      TIMESTAMP,
+      RECORD_ATTRIBUTES,
+      RESOURCE_ATTRIBUTES,
+      VALUE
+    FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS('%s', '%s', '%s', 'CORTEX AGENT'))
+  ),
+  src AS (
     SELECT
       COALESCE(
-        NULLIF(TRIM(f.RECORD_ATTRIBUTES['ai.observability.record_id']::STRING, '"'), ''),
+        NULLIF(TRIM(f.raw_record_id, '"'), ''),
         SHA2(TO_VARCHAR(f.TIMESTAMP) || '|' || COALESCE(f.RESOURCE_ATTRIBUTES['snow.user.name']::STRING, ''), 256)
       ) AS record_id,
       f.TIMESTAMP::TIMESTAMP_TZ AS event_ts,
@@ -810,11 +852,11 @@ USING (
       TRY_PARSE_JSON(r.VALUE:"snow.ai.observability.response"::STRING) AS request_response_json,
       f.VALUE AS raw_value,
       r.VALUE AS request_raw
-    FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS('%s', '%s', '%s', 'CORTEX AGENT')) f
-    LEFT JOIN TABLE(SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS('%s', '%s', '%s', 'CORTEX AGENT')) r
-      ON  f.RECORD_ATTRIBUTES['ai.observability.record_id'] = r.RECORD_ATTRIBUTES['ai.observability.record_id']
-      AND r.RECORD:name = 'CORTEX_AGENT_REQUEST'
-    WHERE f.RECORD:name = 'CORTEX_AGENT_FEEDBACK'
+    FROM all_events f
+    LEFT JOIN all_events r
+      ON f.raw_record_id = r.raw_record_id
+      AND r.event_name = 'CORTEX_AGENT_REQUEST'
+    WHERE f.event_name = 'CORTEX_AGENT_FEEDBACK'%s
   ),
   question_agg AS (
     SELECT
@@ -930,12 +972,47 @@ VALUES (
   s.record_id, s.event_ts, s.agent_name, s.user_name, s.sentiment, s.comment_text, s.categories, s.question, s.response, s.response_time_ms, s.tool_uses, s.raw_value, s.request_raw
 )`,
 		dstFQ,
+		srcDBEsc, srcSchemaEsc, agentEsc,
 		agentEsc,
-		srcDBEsc, srcSchemaEsc, agentEsc,
-		srcDBEsc, srcSchemaEsc, agentEsc,
+		srcWhereExtra,
 	)
 	_, err := c.executeStatement(ctx, dstDB, dstSchema, stmt)
 	return err
+}
+
+// GetLatestFeedbackEventTs returns the latest event_ts for the given agent in the
+// remote feedback table, in normalized UTC string form, or empty string if no rows.
+func (c *Client) GetLatestFeedbackEventTs(ctx context.Context, db, schema, table, agentName string) (string, error) {
+	fq := fmt.Sprintf("%s.%s.%s",
+		identifierSegment(db), identifierSegment(schema), identifierSegment(table))
+	agentEsc := escapeSQLString(unquoteIdentifier(agentName))
+	stmt := fmt.Sprintf(
+		`SELECT MAX(event_ts) AS max_ts FROM %s WHERE agent_name = '%s'`,
+		fq, agentEsc)
+	resp, err := c.executeStatement(ctx, db, schema, stmt)
+	if err != nil {
+		return "", err
+	}
+	if len(resp.Data) == 0 || len(resp.Data[0]) == 0 {
+		return "", nil
+	}
+	colIndex := make(map[string]int)
+	for i, col := range resp.ResultSetMetaData.RowType {
+		colIndex[strings.ToLower(col.Name)] = i
+	}
+	idx, ok := colIndex["max_ts"]
+	if !ok || idx >= len(resp.Data[0]) {
+		return "", nil
+	}
+	v := resp.Data[0][idx]
+	if v == nil {
+		return "", nil
+	}
+	raw, ok := v.(string)
+	if !ok {
+		return "", nil
+	}
+	return parseSnowflakeTimestamp(strings.Trim(raw, `"`)), nil
 }
 
 // GetFeedbackFromTable returns all feedback rows for the given agent from the remote table.
@@ -1069,36 +1146,6 @@ FROM %s WHERE agent_name = '%s' ORDER BY event_ts DESC NULLS LAST`,
 		if idx, ok := colIndex["request_raw"]; ok && idx < len(row) {
 			if s, ok := row[idx].(string); ok {
 				r.RequestRaw = s
-			}
-		}
-		if r.RequestRaw != "" {
-			// Keep remote-only mode robust by filling any missing request-derived fields
-			// directly from request_raw without re-querying observability events.
-			if r.Question == "" {
-				r.Question = extractQuestion(r.RequestRaw)
-			}
-			if r.Response == "" {
-				r.Response = extractResponse(r.RequestRaw)
-			}
-			if r.ResponseTimeMs == 0 {
-				r.ResponseTimeMs = extractResponseTimeMs(r.RequestRaw)
-			}
-			fallback := extractToolUses(r.RequestRaw)
-			if len(fallback) > 0 {
-				needsFallback := len(r.ToolUses) == 0
-				if !needsFallback {
-					allMissingSQL := true
-					for _, tu := range r.ToolUses {
-						if tu.SQL != "" || tu.ToolStatus != "" {
-							allMissingSQL = false
-							break
-						}
-					}
-					needsFallback = allMissingSQL
-				}
-				if needsFallback {
-					r.ToolUses = fallback
-				}
 			}
 		}
 		rows = append(rows, r)

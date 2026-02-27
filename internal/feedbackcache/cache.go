@@ -82,6 +82,21 @@ func Save(agentName string, c *Cache) error {
 	return nil
 }
 
+// LatestTimestamp returns the latest Timestamp among c.Records (UTC string),
+// or empty string if there are no records. Used as the since cursor for diff fetch.
+func (c *Cache) LatestTimestamp() string {
+	if len(c.Records) == 0 {
+		return ""
+	}
+	latest := c.Records[0].Timestamp
+	for _, r := range c.Records[1:] {
+		if r.Timestamp > latest {
+			latest = r.Timestamp
+		}
+	}
+	return latest
+}
+
 // Merge adds any records from fresh that are not already present in c.
 // Existing records retain their Checked state.
 // RecordID is used as the unique key. When it is empty a synthetic key
