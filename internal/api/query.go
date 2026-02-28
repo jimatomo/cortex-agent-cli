@@ -97,19 +97,19 @@ func sinceForSQL(since string) string {
 
 // FeedbackRecord holds a single CORTEX_AGENT_FEEDBACK observability event.
 type FeedbackRecord struct {
-	RecordID       string        `json:"record_id"` // RECORD_ATTRIBUTES['ai.observability.record_id']
-	Timestamp      string        `json:"timestamp"`
-	AgentName      string        `json:"agent_name"`
-	UserName       string        `json:"user_name"`
-	Sentiment      string        `json:"sentiment"` // "positive", "negative", "unknown"
-	Comment        string        `json:"comment"`
-	Categories     []string      `json:"categories,omitempty"`
-	Question       string        `json:"question,omitempty"`         // user's question from the associated REQUEST event
-	Response       string        `json:"response,omitempty"`         // agent's response from the associated REQUEST event
-	ToolUses       []ToolUseInfo `json:"tool_uses,omitempty"`        // tool invocations during agent response
-	ResponseTimeMs int64         `json:"response_time_ms,omitempty"` // total agent response latency in ms
-	RawRecord      string        `json:"raw_record"`                 // VALUE column raw JSON (fallback display)
-	RequestRaw     string        `json:"request_raw,omitempty"`      // CORTEX_AGENT_REQUEST VALUE raw JSON
+	RecordID        string        `json:"record_id"` // RECORD_ATTRIBUTES['ai.observability.record_id']
+	Timestamp       string        `json:"timestamp"`
+	AgentName       string        `json:"agent_name"`
+	UserName        string        `json:"user_name"`
+	Sentiment       string        `json:"sentiment"` // "positive", "negative", "unknown"
+	FeedbackMessage string        `json:"feedback_message"`
+	Categories      []string      `json:"categories,omitempty"`
+	Question        string        `json:"question,omitempty"`         // user's question from the associated REQUEST event
+	Response        string        `json:"response,omitempty"`         // agent's response from the associated REQUEST event
+	ToolUses        []ToolUseInfo `json:"tool_uses,omitempty"`        // tool invocations during agent response
+	ResponseTimeMs  int64         `json:"response_time_ms,omitempty"` // total agent response latency in ms
+	RawRecord       string        `json:"raw_record"`                 // VALUE column raw JSON (fallback display)
+	RequestRaw      string        `json:"request_raw,omitempty"`      // CORTEX_AGENT_REQUEST VALUE raw JSON
 }
 
 // ToolUseInfo captures a single tool invocation from the agent's response.
@@ -206,7 +206,7 @@ func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName, since s
 						}
 					}
 					if msg, ok := valMap["feedback_message"].(string); ok {
-						rec.Comment = msg
+						rec.FeedbackMessage = msg
 					}
 					if cats, ok := valMap["categories"].([]any); ok {
 						for _, c := range cats {
@@ -252,6 +252,7 @@ func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName, since s
 		// It is null when no matching REQUEST event exists.
 		if idx, ok := colIndex["request_value"]; ok && idx < len(row) {
 			if reqJSON, ok := row[idx].(string); ok && reqJSON != "" {
+				rec.RequestRaw = reqJSON
 				rec.Question = extractQuestion(reqJSON)
 				rec.Response = extractResponse(reqJSON)
 				rec.ToolUses = extractToolUses(reqJSON)
@@ -580,8 +581,8 @@ func (c *Client) FeedbackTableExists(ctx context.Context, db, schema, table stri
 }
 
 // CreateFeedbackTable creates or replaces the feedback persistence table.
-// Table columns: record_id, event_ts, agent_name, user_name, sentiment, comment,
-// categories, question, response, response_time_ms, tool_uses, raw_value, request_raw,
+// Table columns: record_id, event_ts, agent_name, user_name, sentiment, feedback_message,
+// categories, question, response, response_time_ms, tool_uses, request_value,
 // checked, checked_at, created_at, updated_at.
 func (c *Client) CreateFeedbackTable(ctx context.Context, db, schema, table string) error {
 	fq := fmt.Sprintf("%s.%s.%s",
@@ -592,14 +593,13 @@ func (c *Client) CreateFeedbackTable(ctx context.Context, db, schema, table stri
   agent_name VARCHAR,
   user_name VARCHAR,
   sentiment VARCHAR,
-  "comment" VARCHAR,
+  feedback_message VARCHAR,
   categories VARCHAR,
   question VARCHAR,
   response VARCHAR,
   response_time_ms NUMBER,
   tool_uses VARIANT,
-  raw_value VARIANT,
-  request_raw VARIANT,
+  request_value VARIANT,
   checked BOOLEAN DEFAULT FALSE,
   checked_at TIMESTAMP_TZ,
   created_at TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP(),
@@ -692,13 +692,13 @@ func (c *Client) UpsertFeedbackRecords(ctx context.Context, db, schema, table st
   agent_name VARCHAR,
   user_name VARCHAR,
   sentiment VARCHAR,
-  comment_text VARCHAR,
+  feedback_message VARCHAR,
   categories_raw VARCHAR,
   question VARCHAR,
   response VARCHAR,
   response_time_ms NUMBER,
   tool_uses_raw VARCHAR,
-  raw_value_raw VARCHAR
+  request_value_raw VARCHAR
 )`, tmpFQ)
 	if _, err := c.executeStatement(ctx, db, schema, createTmpStmt); err != nil {
 		return fmt.Errorf("create temporary feedback stage table: %w", err)
@@ -737,29 +737,29 @@ func (c *Client) UpsertFeedbackRecords(ctx context.Context, db, schema, table st
 				b, _ := json.Marshal(r.ToolUses)
 				toolUsesRaw = fmt.Sprintf("'%s'::VARCHAR", escapeSQLJSONString(string(b)))
 			}
-			rawValueRaw := "NULL"
-			if r.RawRecord != "" {
-				rawValueRaw = fmt.Sprintf("'%s'::VARCHAR", escapeSQLJSONString(r.RawRecord))
+			requestValueRaw := "NULL"
+			if r.RequestRaw != "" {
+				requestValueRaw = fmt.Sprintf("'%s'::VARCHAR", escapeSQLJSONString(r.RequestRaw))
 			}
 			selects = append(selects, fmt.Sprintf(
-				`SELECT '%s'::VARCHAR AS record_id, %s AS event_ts_raw, '%s'::VARCHAR AS agent_name, '%s'::VARCHAR AS user_name, '%s'::VARCHAR AS sentiment, '%s'::VARCHAR AS comment_text, %s AS categories_raw, '%s'::VARCHAR AS question, '%s'::VARCHAR AS response, %d::NUMBER AS response_time_ms, %s AS tool_uses_raw, %s AS raw_value_raw`,
+				`SELECT '%s'::VARCHAR AS record_id, %s AS event_ts_raw, '%s'::VARCHAR AS agent_name, '%s'::VARCHAR AS user_name, '%s'::VARCHAR AS sentiment, '%s'::VARCHAR AS feedback_message, %s AS categories_raw, '%s'::VARCHAR AS question, '%s'::VARCHAR AS response, %d::NUMBER AS response_time_ms, %s AS tool_uses_raw, %s AS request_value_raw`,
 				escapeSQLString(rid),
 				eventTsRaw,
 				escapeSQLString(r.AgentName),
 				escapeSQLString(r.UserName),
 				escapeSQLString(r.Sentiment),
-				escapeSQLString(r.Comment),
+				escapeSQLString(r.FeedbackMessage),
 				categoriesRaw,
 				escapeSQLString(r.Question),
 				escapeSQLString(r.Response),
 				r.ResponseTimeMs,
 				toolUsesRaw,
-				rawValueRaw,
+				requestValueRaw,
 			))
 		}
 
 		insertStmt := fmt.Sprintf(
-			`INSERT INTO %s (record_id, event_ts_raw, agent_name, user_name, sentiment, comment_text, categories_raw, question, response, response_time_ms, tool_uses_raw, raw_value_raw)
+			`INSERT INTO %s (record_id, event_ts_raw, agent_name, user_name, sentiment, feedback_message, categories_raw, question, response, response_time_ms, tool_uses_raw, request_value_raw)
 %s`,
 			tmpFQ,
 			strings.Join(selects, "\nUNION ALL\n"),
@@ -777,17 +777,17 @@ func (c *Client) UpsertFeedbackRecords(ctx context.Context, db, schema, table st
     agent_name,
     user_name,
     sentiment,
-    comment_text,
+    feedback_message,
     TRY_PARSE_JSON(categories_raw) AS categories,
     question,
     response,
     response_time_ms,
     TRY_PARSE_JSON(tool_uses_raw) AS tool_uses,
-    TRY_PARSE_JSON(raw_value_raw) AS raw_value
+    TRY_PARSE_JSON(request_value_raw) AS request_value
   FROM %s
 ) AS s ON t.record_id = s.record_id
-WHEN NOT MATCHED THEN INSERT (record_id, event_ts, agent_name, user_name, sentiment, "comment", categories, question, response, response_time_ms, tool_uses, raw_value)
-VALUES (s.record_id, s.event_ts, s.agent_name, s.user_name, s.sentiment, s.comment_text, s.categories, s.question, s.response, s.response_time_ms, s.tool_uses, s.raw_value)`,
+WHEN NOT MATCHED THEN INSERT (record_id, event_ts, agent_name, user_name, sentiment, feedback_message, categories, question, response, response_time_ms, tool_uses, request_value)
+VALUES (s.record_id, s.event_ts, s.agent_name, s.user_name, s.sentiment, s.feedback_message, s.categories, s.question, s.response, s.response_time_ms, s.tool_uses, s.request_value)`,
 		fq, tmpFQ,
 	)
 	if _, err := c.executeStatement(ctx, db, schema, mergeStmt); err != nil {
@@ -800,7 +800,7 @@ VALUES (s.record_id, s.event_ts, s.agent_name, s.user_name, s.sentiment, s.comme
 // SyncFeedbackFromEventsToTable merges feedback rows directly from observability
 // events into the remote feedback table without Go-side row materialization.
 // If since is non-empty (UTC timestamp string, e.g. "2006-01-02 15:04:05.000 UTC"),
-// only events with f.TIMESTAMP >= since are synced.
+// only events with f.event_ts >= since are synced.
 func (c *Client) SyncFeedbackFromEventsToTable(ctx context.Context, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable, since string) error {
 	dstFQ := fmt.Sprintf("%s.%s.%s",
 		identifierSegment(dstDB), identifierSegment(dstSchema), identifierSegment(dstTable))
@@ -811,119 +811,118 @@ func (c *Client) SyncFeedbackFromEventsToTable(ctx context.Context, srcDB, srcSc
 	srcWhereExtra := ""
 	if since != "" {
 		sinceEsc := escapeSQLString(sinceForSQL(since))
-		srcWhereExtra = fmt.Sprintf(" AND f.TIMESTAMP >= TO_TIMESTAMP_TZ('%s', 'YYYY-MM-DD HH24:MI:SS.FF3 TZHTZM')", sinceEsc)
+		srcWhereExtra = fmt.Sprintf(" AND f.event_ts >= TO_TIMESTAMP_TZ('%s', 'YYYY-MM-DD HH24:MI:SS.FF3 TZHTZM')", sinceEsc)
 	}
 
 	stmt := fmt.Sprintf(
 		`MERGE INTO %s AS tgt
 USING (
-  WITH all_events AS (
-    SELECT
-      RECORD_ATTRIBUTES['ai.observability.record_id']::STRING AS raw_record_id,
-      RECORD:name::STRING AS event_name,
-      TIMESTAMP,
-      RECORD_ATTRIBUTES,
-      RESOURCE_ATTRIBUTES,
-      VALUE
+WITH all_events AS (
+    SELECT *
     FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS('%s', '%s', '%s', 'CORTEX AGENT'))
   ),
-  src AS (
+
+  transformed_events AS (
     SELECT
+      RECORD_ATTRIBUTES['ai.observability.record_id']::STRING AS record_id,
+      RECORD:name::STRING AS event_name,
+      TIMESTAMP::TIMESTAMP_TZ AS event_ts,
+      RECORD_ATTRIBUTES['snow.ai.observability.object.name']::STRING AS agent_name,
       COALESCE(
-        NULLIF(TRIM(f.raw_record_id, '"'), ''),
-        SHA2(TO_VARCHAR(f.TIMESTAMP) || '|' || COALESCE(f.RESOURCE_ATTRIBUTES['snow.user.name']::STRING, ''), 256)
-      ) AS record_id,
-      f.TIMESTAMP::TIMESTAMP_TZ AS event_ts,
-      COALESCE(f.RECORD_ATTRIBUTES['snow.ai.observability.object.name']::STRING, '%s') AS agent_name,
-      COALESCE(
-        f.RECORD_ATTRIBUTES['snow.ai.observability.user.name']::STRING,
-        f.RESOURCE_ATTRIBUTES['snow.user.name']::STRING,
-        ''
+        RECORD_ATTRIBUTES['snow.ai.observability.user.name']::STRING,
+        RESOURCE_ATTRIBUTES['snow.user.name']::STRING
       ) AS user_name,
-      CASE
-        WHEN TRY_TO_BOOLEAN(f.VALUE:positive::STRING) = TRUE THEN 'positive'
-        WHEN TRY_TO_BOOLEAN(f.VALUE:positive::STRING) = FALSE THEN 'negative'
-        ELSE 'unknown'
-      END AS sentiment,
-      f.VALUE:feedback_message::STRING AS comment_text,
-      TO_JSON(f.VALUE:categories) AS categories,
-      TRY_TO_NUMBER(r.VALUE:"snow.ai.observability.response_time_ms"::STRING) AS response_time_ms,
-      r.VALUE AS request_value,
-      TRY_PARSE_JSON(r.VALUE:"snow.ai.observability.response"::STRING) AS request_response_json,
-      f.VALUE AS raw_value,
-      r.VALUE AS request_raw
-    FROM all_events f
-    LEFT JOIN all_events r
-      ON f.raw_record_id = r.raw_record_id
-      AND r.event_name = 'CORTEX_AGENT_REQUEST'
-    WHERE f.event_name = 'CORTEX_AGENT_FEEDBACK'%s
+      CASE WHEN TRY_TO_BOOLEAN(VALUE:positive::STRING) THEN 'positive' ELSE 'negative' END AS sentiment,
+      VALUE:feedback_message::STRING AS feedback_message,
+      TO_JSON(VALUE:categories) AS categories,
+      TRY_TO_NUMBER(VALUE:"snow.ai.observability.response_time_ms"::STRING) AS response_time_ms,
+      TRY_PARSE_JSON(VALUE:"snow.ai.observability.response"::STRING) AS request_response_json,
+      VALUE,
+    FROM all_events
+  	WHERE event_name IN ('CORTEX_AGENT_FEEDBACK', 'CORTEX_AGENT_REQUEST')
   ),
+
+  joined_feedback_and_request AS (
+    SELECT
+      f.record_id,
+      f.event_name,
+      f.event_ts,
+      f.agent_name,
+      f.user_name,
+      f.sentiment,
+      f.feedback_message,
+      f.categories,
+      r.response_time_ms,
+      r.VALUE AS request_value,
+      r.request_response_json,
+    FROM transformed_events f
+    LEFT JOIN transformed_events r
+      ON f.record_id = r.record_id
+  	WHERE f.event_name = 'CORTEX_AGENT_FEEDBACK'
+      AND r.event_name = 'CORTEX_AGENT_REQUEST'
+      -- where clause to filter events by timestamp
+	    %s
+  ),
+
   question_agg AS (
     SELECT
       s.record_id,
-      LISTAGG(msg_part.value:text::STRING, '') WITHIN GROUP (ORDER BY msg.index, msg_part.index) AS question
-    FROM src s,
+      LISTAGG(msg_part.value:text::STRING, '') WITHIN GROUP (ORDER BY msg.index, msg_part.index) AS question,
+    FROM joined_feedback_and_request s,
          LATERAL FLATTEN(input => s.request_value:"snow.ai.observability.request_body":messages) msg,
          LATERAL FLATTEN(input => msg.value:content) msg_part
     WHERE msg.value:role::STRING = 'user'
       AND msg_part.value:type::STRING = 'text'
     GROUP BY s.record_id
   ),
+
   response_agg AS (
     SELECT
       s.record_id,
-      LISTAGG(resp_part.value:text::STRING, '') WITHIN GROUP (ORDER BY resp_part.index) AS response
-    FROM src s,
+      LISTAGG(resp_part.value:text::STRING, '') WITHIN GROUP (ORDER BY resp_part.index) AS response,
+    FROM joined_feedback_and_request s,
          LATERAL FLATTEN(input => s.request_response_json:content) resp_part
     WHERE resp_part.value:type::STRING = 'text'
     GROUP BY s.record_id
   ),
+
   tool_use_rows AS (
     SELECT
       s.record_id,
-      tool_part.index AS tool_index,
       ROW_NUMBER() OVER (PARTITION BY s.record_id ORDER BY tool_part.index) AS tool_ordinal,
-      COALESCE(tool_part.value:tool_use:tool_use_id::STRING, tool_part.value:tool_use_id::STRING) AS tool_use_id,
-      COALESCE(tool_part.value:tool_use:type::STRING, tool_part.value:type::STRING) AS tool_type,
-      COALESCE(tool_part.value:tool_use:name::STRING, tool_part.value:name::STRING) AS tool_name,
-      COALESCE(tool_part.value:tool_use:input:query::STRING, tool_part.value:input:query::STRING) AS query
-    FROM src s,
+      tool_part.value:tool_use:tool_use_id::STRING AS tool_use_id,
+      tool_part.value:tool_use:type::STRING AS tool_type,
+      tool_part.value:tool_use:name::STRING AS tool_name,
+      tool_part.value:tool_use:input:query::STRING AS query,
+      tool_part.value:tool_use:input:previous_related_tool_result_id::STRING AS previous_related_tool_result_id,
+    FROM joined_feedback_and_request s,
          LATERAL FLATTEN(input => s.request_response_json:content) tool_part
     WHERE tool_part.value:type::STRING = 'tool_use'
   ),
+
   tool_result_rows AS (
     SELECT
       s.record_id,
-      ROW_NUMBER() OVER (PARTITION BY s.record_id ORDER BY result_part.index) AS result_ordinal,
-      COALESCE(result_part.value:tool_result:tool_use_id::STRING, result_part.value:tool_use_id::STRING) AS tool_use_id,
-      COALESCE(
-        result_part.value:tool_result:status::STRING,
-        result_part.value:status::STRING,
-        result_part.value:tool_result:tool_status::STRING
-      ) AS tool_status,
-      COALESCE(result_part.value:tool_result, result_part.value) AS result_payload
-    FROM src s,
+      result_part.value:tool_result:tool_use_id::STRING AS tool_use_id,
+      result_part.value:tool_result:type::STRING AS tool_result_type,
+      result_part.value:tool_result:status::STRING AS tool_status,
+      result_part.value:tool_result AS result_payload,
+    FROM joined_feedback_and_request s,
          LATERAL FLATTEN(input => s.request_response_json:content) result_part
     WHERE result_part.value:type::STRING = 'tool_result'
   ),
+
   tool_result_agg AS (
     SELECT
       tr.record_id,
-      tr.result_ordinal,
       tr.tool_use_id,
-      MAX(tr.tool_status) AS tool_status,
-      MAX(
-        COALESCE(
-          result_content.value:json:sql::STRING,
-          result_content.value:JSON:SQL::STRING,
-          result_content.value:sql::STRING,
-          result_content.value:SQL::STRING
-        )
-      ) AS sql
-    FROM tool_result_rows tr
-    LEFT JOIN LATERAL FLATTEN(input => COALESCE(tr.result_payload:content, ARRAY_CONSTRUCT())) result_content
-    GROUP BY tr.record_id, tr.result_ordinal, tr.tool_use_id
+      tr.tool_status,
+      LISTAGG(result_content.value:json:sql::STRING, ',') AS sql,
+    FROM tool_result_rows tr,
+         LATERAL FLATTEN(input => tr.result_payload:content) result_content
+    GROUP BY tr.record_id, tr.tool_use_id, tr.tool_status
   ),
+
   tool_agg AS (
     SELECT
       tu.record_id,
@@ -935,45 +934,54 @@ USING (
           'tool_status', tr.tool_status,
           'sql', tr.sql
         )
-      ) WITHIN GROUP (ORDER BY tu.tool_index) AS tool_uses
+      ) WITHIN GROUP (ORDER BY tu.tool_ordinal) AS tool_uses
     FROM tool_use_rows tu
     LEFT JOIN tool_result_agg tr
       ON tr.record_id = tu.record_id
-     AND (
-       (COALESCE(tr.tool_use_id, '') <> '' AND tr.tool_use_id = tu.tool_use_id) OR
-       (COALESCE(tr.tool_use_id, '') = '' AND COALESCE(tu.tool_use_id, '') = '' AND tr.result_ordinal = tu.tool_ordinal)
-     )
+      AND tr.tool_use_id = tu.tool_use_id
     GROUP BY tu.record_id
+  ),
+
+  enriched_feedback_and_request AS (
+    SELECT
+      s.*,
+      q.question,
+      r.response,
+      tu.tool_uses
+    FROM joined_feedback_and_request s
+    LEFT JOIN tool_agg tu ON tu.record_id = s.record_id
+    LEFT JOIN question_agg q ON q.record_id = s.record_id
+    LEFT JOIN response_agg r ON r.record_id = s.record_id
+  ),
+
+  final AS (
+    SELECT
+      record_id,
+      event_ts,
+      agent_name,
+      user_name,
+      sentiment,
+      feedback_message,
+      categories,
+      question,
+      response,
+      response_time_ms,
+      tool_uses,
+      request_value,
+    FROM enriched_feedback_and_request
   )
-  SELECT
-    s.record_id,
-    s.event_ts,
-    s.agent_name,
-    s.user_name,
-    s.sentiment,
-    s.comment_text,
-    s.categories,
-    q.question,
-    r.response,
-    s.response_time_ms,
-    tu.tool_uses,
-    s.raw_value,
-    s.request_raw
-  FROM src s
-  LEFT JOIN question_agg q ON q.record_id = s.record_id
-  LEFT JOIN response_agg r ON r.record_id = s.record_id
-  LEFT JOIN tool_agg tu ON tu.record_id = s.record_id
+
+  SELECT * FROM final
 ) AS s
 ON tgt.record_id = s.record_id
 WHEN NOT MATCHED THEN INSERT (
-  record_id, event_ts, agent_name, user_name, sentiment, "comment", categories, question, response, response_time_ms, tool_uses, raw_value, request_raw
+  record_id, event_ts, agent_name, user_name, sentiment, feedback_message, categories, question, response, response_time_ms, tool_uses, request_value
 )
 VALUES (
-  s.record_id, s.event_ts, s.agent_name, s.user_name, s.sentiment, s.comment_text, s.categories, s.question, s.response, s.response_time_ms, s.tool_uses, s.raw_value, s.request_raw
+  s.record_id, s.event_ts, s.agent_name, s.user_name, s.sentiment, s.feedback_message, s.categories, s.question, s.response, s.response_time_ms, s.tool_uses, s.request_value
 )`,
 		dstFQ,
 		srcDBEsc, srcSchemaEsc, agentEsc,
-		agentEsc,
 		srcWhereExtra,
 	)
 	_, err := c.executeStatement(ctx, dstDB, dstSchema, stmt)
@@ -1021,7 +1029,7 @@ func (c *Client) GetFeedbackFromTable(ctx context.Context, db, schema, table, ag
 		identifierSegment(db), identifierSegment(schema), identifierSegment(table))
 	agentEsc := escapeSQLString(unquoteIdentifier(agentName))
 	stmt := fmt.Sprintf(
-		`SELECT record_id, event_ts, agent_name, user_name, sentiment, "comment", categories, question, response, response_time_ms, tool_uses, raw_value, request_raw, checked, checked_at
+		`SELECT record_id, event_ts, agent_name, user_name, sentiment, feedback_message, categories, question, response, response_time_ms, tool_uses, request_value, checked, checked_at
 FROM %s WHERE agent_name = '%s' ORDER BY event_ts DESC NULLS LAST`,
 		fq, agentEsc)
 	resp, err := c.executeStatement(ctx, db, schema, stmt)
@@ -1059,7 +1067,7 @@ FROM %s WHERE agent_name = '%s' ORDER BY event_ts DESC NULLS LAST`,
 		r.AgentName = getStr("agent_name")
 		r.UserName = getStr("user_name")
 		r.Sentiment = getStr("sentiment")
-		r.Comment = getStr("comment") // column is "comment" (reserved word)
+		r.FeedbackMessage = getStr("feedback_message")
 		r.Question = getStr("question")
 		r.Response = getStr("response")
 		r.Checked = getBool("checked")
@@ -1138,12 +1146,7 @@ FROM %s WHERE agent_name = '%s' ORDER BY event_ts DESC NULLS LAST`,
 				}
 			}
 		}
-		if idx, ok := colIndex["raw_value"]; ok && idx < len(row) {
-			if s, ok := row[idx].(string); ok {
-				r.RawRecord = s
-			}
-		}
-		if idx, ok := colIndex["request_raw"]; ok && idx < len(row) {
+		if idx, ok := colIndex["request_value"]; ok && idx < len(row) {
 			if s, ok := row[idx].(string); ok {
 				r.RequestRaw = s
 			}

@@ -140,7 +140,7 @@ func TestSaveAndLoad(t *testing.T) {
 
 	original := &feedbackcache.Cache{
 		Records: []feedbackcache.Record{
-			{Checked: true, FeedbackRecord: api.FeedbackRecord{RecordID: "r1", Sentiment: "negative", Comment: "not helpful"}},
+			{Checked: true, FeedbackRecord: api.FeedbackRecord{RecordID: "r1", Sentiment: "negative", FeedbackMessage: "not helpful"}},
 			{Checked: false, FeedbackRecord: api.FeedbackRecord{RecordID: "r2", Sentiment: "positive"}},
 		},
 	}

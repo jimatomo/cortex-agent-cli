@@ -404,10 +404,10 @@ func printOneRecord(cmd *cobra.Command, idx, total int, r feedbackcache.Record, 
 		fmt.Fprintf(cmd.OutOrStdout(), "      Sentiment: %s\n", r.Sentiment)
 	}
 
-	if r.Comment != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "      Comment:   %q\n", r.Comment)
+	if r.FeedbackMessage != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "      FeedbackMessage: %q\n", r.FeedbackMessage)
 	} else {
-		fmt.Fprintf(cmd.OutOrStdout(), "      Comment:   (not identified)\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "      FeedbackMessage: (not identified)\n")
 	}
 	if len(r.Categories) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "      Categories: %s\n", strings.Join(r.Categories, ", "))

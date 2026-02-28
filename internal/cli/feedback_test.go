@@ -75,11 +75,11 @@ func TestRunFeedbackInit_RequiresRemoteConfig(t *testing.T) {
 func TestMergeRemoteRows_FilterCheckedByDefault(t *testing.T) {
 	rows := []api.FeedbackTableRow{
 		{
-			FeedbackRecord: api.FeedbackRecord{RecordID: "r1", Comment: "unchecked"},
+			FeedbackRecord: api.FeedbackRecord{RecordID: "r1", FeedbackMessage: "unchecked"},
 			Checked:        false,
 		},
 		{
-			FeedbackRecord: api.FeedbackRecord{RecordID: "r2", Comment: "checked"},
+			FeedbackRecord: api.FeedbackRecord{RecordID: "r2", FeedbackMessage: "checked"},
 			Checked:        true,
 		},
 	}
