@@ -1,0 +1,105 @@
+# Command Reference
+
+Canonical inventory of all coragent commands and subcommands, with implementation entrypoints and primary dependencies.
+
+## Root Commands
+
+### plan [path]
+- **Use:** `plan [path]`
+- **Entry:** `newPlanCmd` → RunE closure
+- **Dependencies:** `agent.LoadAgents`, `buildClientAndCfg`, `buildPlanItems`, `diff.DiffForCreate`, `diff.HasChanges`, `grant.GrantDiff`
+- **Side effects:** API read (GetAgent, ShowGrants); stdout only
+- **Flags:** `-R`/`--recursive`
+
+### apply [path]
+- **Use:** `apply [path]`
+- **Entry:** `newApplyCmd` → RunE closure
+- **Dependencies:** `agent.LoadAgents`, `buildClientAndCfg`, `buildPlanItems`, `executeApply`, `diff`, `grant`, `config.LoadCoragentConfig`
+- **Side effects:** API write (CreateAgent, UpdateAgent, ExecuteGrant, ExecuteRevoke); optional eval run; confirmation prompt
+- **Flags:** `-y`/`--yes`, `-R`/`--recursive`, `--eval`
+
+### delete [path]
+- **Use:** `delete [path]`
+- **Entry:** `newDeleteCmd` → RunE closure
+- **Dependencies:** `agent.LoadAgents`, `buildClientAndCfg`, `ResolveTarget`, `client.GetAgent`, `client.DeleteAgent`
+- **Side effects:** API read + delete; confirmation prompt
+- **Flags:** `-y`/`--yes`, `-R`/`--recursive`
+
+### validate [path]
+- **Use:** `validate [path]`
+- **Entry:** `newValidateCmd` → RunE closure
+- **Dependencies:** `agent.LoadAgents`
+- **Side effects:** None (no API); stdout only
+- **Flags:** `-R`/`--recursive`
+
+### export <agent-name>
+- **Use:** `export <agent-name>`
+- **Entry:** `newExportCmd` → RunE closure
+- **Dependencies:** `buildClientAndCfg`, `ResolveTargetForExport`, `client.DescribeAgent`
+- **Side effects:** API read; stdout or file write (`-o`)
+- **Flags:** `-o`/`--out`
+
+### new
+- **Use:** `new`
+- **Entry:** `newNewCmd` → `runNew`
+- **Dependencies:** `agent.AgentSpec`, `readLine`, `promptWithDefault`, `reorderExportKeys`
+- **Side effects:** File I/O (write YAML); interactive prompts
+- **Flags:** None
+
+### run [agent-name]
+- **Use:** `run [agent-name]`
+- **Entry:** `newRunCmd` → RunE closure
+- **Dependencies:** `buildClientAndCfg`, `ResolveTargetForExport`, `api.RunAgent`, `thread.LoadState`, `thread.Save`
+- **Side effects:** API (RunAgent, CreateThread); thread state read/write; streaming stdout/stderr
+- **Flags:** `-m`/`--message`, `--show-thinking`, `--new`, `--thread`, `--without-thread`
+
+### threads
+- **Use:** `threads`
+- **Entry:** `newThreadsCmd` → RunE closure
+- **Dependencies:** `thread.LoadState`, `buildClient`, `client.DeleteThread`
+- **Side effects:** API (DeleteThread); thread state read/write; interactive UI
+- **Flags:** `--list`, `--delete`
+
+### eval [path]
+- **Use:** `eval [path]`
+- **Entry:** `newEvalCmd` → RunE closure
+- **Dependencies:** `agent.LoadAgents`, `buildClientAndCfg`, `config.LoadCoragentConfig`, `api.RunAgent`, `eval_judge`
+- **Side effects:** API (RunAgent); file I/O (JSON/MD reports)
+- **Flags:** `-o`/`--output-dir`, `-R`/`--recursive`
+
+### feedback [agent-name]
+- **Use:** `feedback [agent-name]`
+- **Entry:** `newFeedbackCmd` → RunE closure
+- **Dependencies:** `config.LoadCoragentConfig`, `buildClientAndCfg`, `api.GetFeedback`, `api.FeedbackTableExists`, `api.SyncFeedbackFromEventsToTable`, `api.GetFeedbackFromTable`, `feedbackcache`
+- **Side effects:** API read/write (feedback fetch, remote table sync/update/clear); feedback cache read/write in local mode; optional remote table init
+- **Flags:** `--all`, `--limit`, `--json`, `-y`/`--yes`, `--include-checked`, `--no-tools`, `--clear`, `--init`
+
+### login
+- **Use:** `login`
+- **Entry:** `newLoginCmd` → `runLogin`
+- **Dependencies:** `auth.NewCallbackServer`, `auth.GenerateState`, `auth.GeneratePKCE`, `auth.BuildAuthorizationURL`, `auth.ExchangeCodeForTokens`, `auth.LoadTokenStore`
+- **Side effects:** OAuth flow (browser or manual URL); token store write
+- **Flags:** `-a`/`--account`, `--redirect-uri`, `--no-browser`, `--timeout`
+
+### logout
+- **Use:** `logout`
+- **Entry:** `newLogoutCmd` → `runLogout`
+- **Dependencies:** `auth.LoadTokenStore`, `store.DeleteTokens`, `store.Clear`
+- **Side effects:** Token store write (delete tokens)
+- **Flags:** `-a`/`--account`, `--all`
+
+## Auth Subcommands
+
+### auth status
+- **Use:** `auth status`
+- **Entry:** `newAuthStatusCmd` → `runAuthStatus`
+- **Dependencies:** `auth.LoadConfig`, `auth.DiagnoseConfig`, `auth.LoadTokenStore`
+- **Side effects:** None (read-only)
+- **Flags:** `-a`/`--account`
+
+### auth init
+- **Use:** `auth init`
+- **Entry:** `newAuthInitCmd` → `runAuthInit`
+- **Dependencies:** `auth.LoadSnowflakeConnection`, `auth.WriteConnection`, `promptWithDefault`
+- **Side effects:** File I/O (create or update `~/.snowflake/config.toml`); interactive prompts
+- **Flags:** `--force`

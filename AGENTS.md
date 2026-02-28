@@ -35,3 +35,12 @@ golangci-lint run
 - **Mocking:** `internal/regression/mock.go` implements all service interfaces
 - **Integration tests:** Build tag `integration`, require Snowflake credentials
 - **Coverage target:** 40% minimum (enforced in CI)
+
+## Internal Implementation Docs
+
+Internal implementation documentation lives under [reference/docs](./reference/docs). These docs must be maintained in sync with the codebase.
+
+- **Location:** [reference/docs](./reference/docs) — architecture, flows, components, commands, testing, maintenance
+- **Maintenance rule:** Any functional change in `cmd/` or `internal/` requires reviewing and updating affected markdown files in `reference/docs` in the same PR/commit.
+- **New packages/flows:** Add a corresponding docs entry and update the index in `reference/docs/README.md`.
+- **Command tree changes:** Any change to `new*Cmd`, `Use:` strings, or `AddCommand` wiring requires updating [reference/docs/commands/](./reference/docs/commands/).
