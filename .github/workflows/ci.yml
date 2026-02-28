@@ -33,15 +33,7 @@ jobs:
         run: go test -race -short ./...
       - name: Check coverage (non-integration packages)
         run: |
-          go test -short -coverprofile=coverage.out \
-            ./internal/agent/... \
-            ./internal/api/... \
-            ./internal/auth/... \
-            ./internal/cli/... \
-            ./internal/config/... \
-            ./internal/diff/... \
-            ./internal/grant/... \
-            ./internal/thread/...
+          go test -short -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out | tail -1
           COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
           THRESHOLD=40
