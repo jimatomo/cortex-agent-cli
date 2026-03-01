@@ -32,7 +32,7 @@ type Config struct {
 	PrivateKey           string
 	PrivateKeyPassphrase string
 	Authenticator        string
-	// OAuth redirect URI (optional, default: http://127.0.0.1:8080/callback)
+	// OAuth redirect URI (optional, default: http://127.0.0.1:8080)
 	OAuthRedirectURI string
 }
 

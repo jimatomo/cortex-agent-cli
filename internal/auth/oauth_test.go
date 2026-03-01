@@ -108,9 +108,9 @@ func TestBuildAuthorizationURL(t *testing.T) {
 			},
 		},
 		{
-			name:  "with PKCE",
-			cfg:   OAuthConfig{Account: "MYACCT"},
-			pkce:  &PKCEChallenge{CodeVerifier: "v", CodeChallenge: "c"},
+			name: "with PKCE",
+			cfg:  OAuthConfig{Account: "MYACCT"},
+			pkce: &PKCEChallenge{CodeVerifier: "v", CodeChallenge: "c"},
 			check: func(url string) error {
 				if !strings.Contains(url, "code_challenge=c") {
 					return errContains("code_challenge")
@@ -406,5 +406,30 @@ func TestRefreshAccessToken_MissingToken(t *testing.T) {
 	_, err := RefreshAccessToken(context.Background(), OAuthConfig{Account: "ACCT"}, "")
 	if err == nil {
 		t.Fatal("expected error for empty refresh token")
+	}
+}
+
+func TestGetValidAccessToken_RefreshFailurePromptsLogin(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	store := &TokenStore{Tokens: make(map[string]OAuthTokens)}
+	store.SetTokens(OAuthTokens{
+		// Space in account makes refresh URL invalid and forces refresh failure
+		// without depending on network calls.
+		Account:      "bad account",
+		AccessToken:  "expired-access-token",
+		RefreshToken: "refresh-token",
+		ExpiresAt:    time.Now().Add(-1 * time.Minute),
+	})
+	if err := store.Save(); err != nil {
+		t.Fatalf("save token store: %v", err)
+	}
+
+	_, err := GetValidAccessToken(context.Background(), Config{Account: "bad account"})
+	if err == nil {
+		t.Fatal("expected refresh failure")
+	}
+	if !strings.Contains(err.Error(), "run 'coragent login' again") {
+		t.Errorf("error = %q, want to prompt login", err.Error())
 	}
 }

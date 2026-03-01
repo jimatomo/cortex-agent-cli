@@ -314,7 +314,7 @@ func GetValidAccessToken(ctx context.Context, cfg Config) (string, error) {
 
 	newTokens, err := RefreshAccessToken(ctx, oauthCfg, tokens.RefreshToken)
 	if err != nil {
-		return "", fmt.Errorf("refresh access token: %w", err)
+		return "", fmt.Errorf("refresh access token failed (stored refresh token may be invalid or revoked): %w; run 'coragent login' again", err)
 	}
 
 	// Save refreshed tokens
