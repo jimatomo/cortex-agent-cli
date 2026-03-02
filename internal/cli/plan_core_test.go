@@ -21,6 +21,8 @@ type fakeAgentService struct {
 	GetAgentErr error
 	// ShowGrantsErr, if non-nil, is returned by every ShowGrants call.
 	ShowGrantsErr error
+	// ShowGrantsCallCount records how many times ShowGrants was invoked.
+	ShowGrantsCallCount int
 }
 
 func (f *fakeAgentService) agentKey(db, schema, name string) string {
@@ -60,6 +62,7 @@ func (f *fakeAgentService) DescribeAgent(_ context.Context, _, _, _ string) (api
 // GrantService methods
 
 func (f *fakeAgentService) ShowGrants(_ context.Context, db, schema, name string) ([]api.ShowGrantsRow, error) {
+	f.ShowGrantsCallCount++
 	if f.ShowGrantsErr != nil {
 		return nil, f.ShowGrantsErr
 	}
@@ -214,9 +217,16 @@ func TestBuildPlanItems_GetAgentError(t *testing.T) {
 }
 
 // TestBuildPlanItems_ShowGrantsError verifies that ShowGrants errors are
-// propagated for existing agents.
+// propagated for existing agents when deploy.grant is specified.
 func TestBuildPlanItems_ShowGrantsError(t *testing.T) {
-	spec := agent.AgentSpec{Name: "agent"}
+	spec := agent.AgentSpec{
+		Name: "agent",
+		Deploy: &agent.DeployConfig{
+			Grant: &agent.GrantConfig{
+				AccountRoles: []agent.RoleGrant{{Role: "ROLE_A", Privileges: []string{"USAGE"}}},
+			},
+		},
+	}
 	key := "TEST_DB.PUBLIC.agent"
 	svc := &fakeAgentService{
 		Agents:        map[string]agent.AgentSpec{key: spec},
@@ -227,5 +237,58 @@ func TestBuildPlanItems_ShowGrantsError(t *testing.T) {
 	_, err := buildPlanItems(context.Background(), specs, testOpts(), testCfg(), svc, svc)
 	if err == nil {
 		t.Fatal("expected error from ShowGrants failure")
+	}
+}
+
+// TestBuildPlanItems_GrantUnspecifiedSkipsShowGrants verifies that when
+// deploy.grant is not specified, ShowGrants is not called and GrantDiff is empty.
+func TestBuildPlanItems_GrantUnspecifiedSkipsShowGrants(t *testing.T) {
+	spec := agent.AgentSpec{Name: "agent", Comment: "hello"}
+	key := "TEST_DB.PUBLIC.agent"
+	svc := &fakeAgentService{
+		Agents: map[string]agent.AgentSpec{key: spec},
+		// ShowGrantsErr would fail if ShowGrants were called
+		ShowGrantsErr: fmt.Errorf("grants unavailable"),
+	}
+	specs := []agent.ParsedAgent{{Path: "a.yaml", Spec: spec}}
+
+	items, err := buildPlanItems(context.Background(), specs, testOpts(), testCfg(), svc, svc)
+	if err != nil {
+		t.Fatalf("buildPlanItems: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].GrantDiff.HasChanges() {
+		t.Error("expected no grant changes when grant is unspecified")
+	}
+	if svc.ShowGrantsCallCount != 0 {
+		t.Errorf("expected ShowGrants not to be called when grant unspecified, got %d calls", svc.ShowGrantsCallCount)
+	}
+}
+
+// TestBuildPlanItems_GrantUnspecifiedWithDeployBlock verifies that when
+// deploy exists but grant is nil, grant logic is still skipped.
+func TestBuildPlanItems_GrantUnspecifiedWithDeployBlock(t *testing.T) {
+	spec := agent.AgentSpec{
+		Name:   "agent",
+		Deploy: &agent.DeployConfig{Database: "TEST_DB", Schema: "PUBLIC"},
+	}
+	key := "TEST_DB.PUBLIC.agent"
+	svc := &fakeAgentService{
+		Agents:        map[string]agent.AgentSpec{key: spec},
+		ShowGrantsErr: fmt.Errorf("grants unavailable"),
+	}
+	specs := []agent.ParsedAgent{{Path: "a.yaml", Spec: spec}}
+
+	items, err := buildPlanItems(context.Background(), specs, testOpts(), testCfg(), svc, svc)
+	if err != nil {
+		t.Fatalf("buildPlanItems: %v", err)
+	}
+	if items[0].GrantDiff.HasChanges() {
+		t.Error("expected no grant changes when deploy.grant is nil")
+	}
+	if svc.ShowGrantsCallCount != 0 {
+		t.Errorf("expected ShowGrants not to be called, got %d calls", svc.ShowGrantsCallCount)
 	}
 }

@@ -51,6 +51,13 @@ Valid privileges: `USAGE`, `MODIFY`, `MONITOR`, `ALL` (expands to USAGE+MODIFY+M
 - **ShowGrants** — Returns rows with `Privilege`, `GrantedTo` (ACCOUNT_ROLE/DATABASE_ROLE), `GranteeName`
 - **ExecuteGrant** / **ExecuteRevoke** — Run SQL via API
 
+### Grant Unspecified
+
+When `deploy.grant` is not specified in the YAML spec, grant logic is skipped entirely:
+- `ShowGrants` is not called (avoids unnecessary API call)
+- No GRANT/REVOKE statements are executed
+- Existing grants on the agent are left unchanged
+
 ## Related Docs
 
 - [flows/plan-apply-flow.md](../flows/plan-apply-flow.md) — How diff and grant are used

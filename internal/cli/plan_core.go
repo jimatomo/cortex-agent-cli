@@ -52,16 +52,22 @@ func buildPlanItems(
 			continue
 		}
 
-		grantRows, err := grantSvc.ShowGrants(ctx, target.Database, target.Schema, item.Spec.Name)
-		if err != nil {
-			return nil, fmt.Errorf("show grants: %w", err)
-		}
-		currentGrants := grant.FromShowGrantsRows(convertGrantRows(grantRows))
-		grantDiff := grant.ComputeDiff(desiredGrants, currentGrants)
-
 		changes, err := diff.Diff(item.Spec, remote)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", item.Path, err)
+		}
+
+		var grantDiff grant.GrantDiff
+		if grantCfg == nil {
+			// Skip grant logic when deploy.grant is not specified; leave existing grants untouched.
+			grantDiff = grant.GrantDiff{}
+		} else {
+			grantRows, err := grantSvc.ShowGrants(ctx, target.Database, target.Schema, item.Spec.Name)
+			if err != nil {
+				return nil, fmt.Errorf("show grants: %w", err)
+			}
+			currentGrants := grant.FromShowGrantsRows(convertGrantRows(grantRows))
+			grantDiff = grant.ComputeDiff(desiredGrants, currentGrants)
 		}
 
 		items = append(items, applyItem{

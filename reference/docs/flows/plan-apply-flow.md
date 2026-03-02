@@ -37,7 +37,8 @@ flowchart LR
 - **Behavior:**
   - For each spec: resolve target, call `agentSvc.GetAgent` to get remote state
   - If not exists: compute grant diff vs empty; plan create
-  - If exists: call `grantSvc.ShowGrants`, compute grant diff; call `diff.Diff(spec, remote)` for spec changes
+  - If exists and `deploy.grant` is specified: call `grantSvc.ShowGrants`, compute grant diff; call `diff.Diff(spec, remote)` for spec changes
+  - If exists and `deploy.grant` is not specified: skip grant logic (no ShowGrants, empty grant diff)
 - **Output:** `[]applyItem` (parsed, target, exists, changes, grantDiff)
 
 ### 4. Plan Output
@@ -53,7 +54,7 @@ flowchart LR
   - For each item:
     - If not exists: `CreateAgent`, optional post-create update for `tool_resources`, `applyGrantDiff`
     - If exists and has spec changes: `UpdateAgent` with payload from `updatePayload(spec, changes)`
-    - Always: `applyGrantDiff` (GRANT/REVOKE as needed)
+    - Always: `applyGrantDiff` (GRANT/REVOKE as needed; no-op when grant diff is empty, e.g. when `deploy.grant` was not specified)
 - **Output:** Subset of items that were created or updated
 
 ## Grant Diff
