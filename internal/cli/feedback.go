@@ -424,22 +424,11 @@ func printOneRecord(cmd *cobra.Command, idx, total int, r feedbackcache.Record, 
 		fmt.Fprintf(cmd.OutOrStdout(), "      Question:  %s\n", indentMultiline(r.Question, "               "))
 	}
 	if r.Response != "" {
-		display := r.Response
-		truncated := false
-		const maxLen = 1000
-		if len([]rune(display)) > maxLen {
-			runes := []rune(display)
-			display = string(runes[:maxLen])
-			truncated = true
-		}
 		const indent = "      "
 		const sepWidth = 40
 		fmt.Fprintln(cmd.OutOrStdout(), indent+"── Response "+strings.Repeat("─", sepWidth-len("── Response ")))
-		for _, line := range strings.Split(display, "\n") {
+		for _, line := range strings.Split(r.Response, "\n") {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s%s\n", indent, line)
-		}
-		if truncated {
-			fmt.Fprintf(cmd.OutOrStdout(), "%s...(truncated)\n", indent)
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), indent+strings.Repeat("─", sepWidth))
 	}

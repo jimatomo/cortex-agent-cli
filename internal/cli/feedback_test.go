@@ -1,14 +1,18 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"coragent/internal/api"
 	"coragent/internal/feedbackcache"
 	"coragent/internal/config"
+
+	"github.com/spf13/cobra"
 )
 
 func TestResolveFeedbackRemote(t *testing.T) {
@@ -201,5 +205,31 @@ func TestFormatToolChain(t *testing.T) {
 	want := "cortex_analyst_text_to_sql (sample_semantic_view) → search → custom_tool"
 	if got != want {
 		t.Fatalf("formatToolChain() = %q, want %q", got, want)
+	}
+}
+
+func TestPrintOneRecord_ShowsFullResponseWithoutTruncation(t *testing.T) {
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+
+	longResponse := strings.Repeat("a", 1200) + "\n" + strings.Repeat("b", 1200)
+	firstLine := strings.Repeat("a", 1200)
+	secondLine := strings.Repeat("b", 1200)
+	printOneRecord(cmd, 1, 1, feedbackcache.Record{
+		FeedbackRecord: api.FeedbackRecord{
+			Timestamp: "2026-03-08 00:00:00.000 UTC",
+			UserName:  "alice",
+			Sentiment: "negative",
+			Response:  longResponse,
+		},
+	}, false, true)
+
+	got := out.String()
+	if !strings.Contains(got, "      "+firstLine) || !strings.Contains(got, "      "+secondLine) {
+		t.Fatalf("expected full response in output, got:\n%s", got)
+	}
+	if strings.Contains(got, "...(truncated)") {
+		t.Fatalf("did not expect truncation marker, got:\n%s", got)
 	}
 }

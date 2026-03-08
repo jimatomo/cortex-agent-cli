@@ -43,7 +43,7 @@ These flows cover agent execution (`run`), feedback retrieval (`feedback`), and 
 2. Resolve remote DB/schema/table if enabled
 3. If remote mode: ensure table exists, sync new events (`SyncFeedbackFromEventsToTable`), then fetch rows (`GetFeedbackFromTable`)
 4. If local mode: fetch incremental feedback via API (`GetFeedback`) and merge with local cache (`~/.coragent/feedback/<agent>.json`)
-5. Display records (default negative only; `--all` for all)
+5. Display records (default negative only; `--all` for all). Response bodies are printed in full without truncation in the interactive text output
 6. Prompt to mark as checked; update remote table or local cache depending on mode
 
 ### Dependencies
