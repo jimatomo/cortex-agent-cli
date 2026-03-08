@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"coragent/internal/api"
+	"coragent/internal/feedbackcache"
 	"coragent/internal/config"
 )
 
@@ -139,6 +141,54 @@ func TestMergeRemoteRows_AppliesToolFallback(t *testing.T) {
 	}
 	if len(got[0].ToolUses) != 1 || got[0].ToolUses[0].SQL != "select 1" || got[0].ToolUses[0].ToolStatus != "success" {
 		t.Fatalf("fallback tool info not applied: %+v", got[0].ToolUses)
+	}
+}
+
+func TestMarshalFeedbackJSON_EmptyReturnsArray(t *testing.T) {
+	tests := []struct {
+		name    string
+		records []feedbackcache.Record
+	}{
+		{name: "nil slice", records: nil},
+		{name: "empty slice", records: []feedbackcache.Record{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := marshalFeedbackJSON(tt.records)
+			if err != nil {
+				t.Fatalf("marshalFeedbackJSON() error = %v", err)
+			}
+			if string(got) != "[]" {
+				t.Fatalf("marshalFeedbackJSON() = %s, want []", got)
+			}
+		})
+	}
+}
+
+func TestMarshalFeedbackJSON_NonEmptyReturnsArray(t *testing.T) {
+	got, err := marshalFeedbackJSON([]feedbackcache.Record{
+		{
+			Checked: false,
+			FeedbackRecord: api.FeedbackRecord{
+				RecordID:  "r1",
+				Timestamp: "2026-03-08 00:00:00.000 UTC",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshalFeedbackJSON() error = %v", err)
+	}
+
+	var decoded []map[string]any
+	if err := json.Unmarshal(got, &decoded); err != nil {
+		t.Fatalf("unmarshal output: %v\noutput=%s", err, got)
+	}
+	if len(decoded) != 1 {
+		t.Fatalf("len(decoded) = %d, want 1", len(decoded))
+	}
+	if decoded[0]["record_id"] != "r1" {
+		t.Fatalf("decoded[0][record_id] = %v, want r1", decoded[0]["record_id"])
 	}
 }
 

@@ -203,7 +203,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 
 			// 5. JSON output — no prompt.
 			if jsonOut {
-				data, err := json.MarshalIndent(toShow, "", "  ")
+				data, err := marshalFeedbackJSON(toShow)
 				if err != nil {
 					return fmt.Errorf("marshal JSON: %w", err)
 				}
@@ -381,6 +381,13 @@ func mergeRemoteRows(rows []api.FeedbackTableRow, includeChecked bool, toolByRec
 		})
 	}
 	return out
+}
+
+func marshalFeedbackJSON(records []feedbackcache.Record) ([]byte, error) {
+	if len(records) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.MarshalIndent(records, "", "  ")
 }
 
 // printOneRecord prints a single feedback record with its index out of total.

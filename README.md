@@ -611,7 +611,7 @@ coragent feedback --init
 |------|-------------|
 | `--all` | Show all feedback (default: negative only) |
 | `--limit int` | Maximum number of records to show (default: 50, 0 = unlimited) |
-| `--json` | Output as JSON array (skips check prompt) |
+| `--json` | Output as JSON (returns `[]` when no records; skips check prompt) |
 | `-y`, `--yes` | Auto-confirm marking each record as checked |
 | `--include-checked` | Also show already-checked records (marked with `[✓]`) |
 | `--no-tools` | Hide tool invocation details (Tools, Query, SQL) |
