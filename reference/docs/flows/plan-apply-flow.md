@@ -45,6 +45,8 @@ flowchart LR
 
 - **Plan:** Prints create/update/no-change per agent, with diff details and grant changes
 - **Apply:** Same plan output, then confirmation prompt (unless `-y`), then `executeApply`
+- **Value rendering:** String diff values are printed in full (quoted for readability) and are not truncated, so long values and multibyte text such as Japanese remain intact in plan/apply/delete previews
+- **Modified rendering:** Updated values use a colored arrow between before/after values to make replacements easier to scan in the CLI output
 
 ### 5. Execute Apply
 

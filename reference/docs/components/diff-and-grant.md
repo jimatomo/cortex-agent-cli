@@ -22,6 +22,7 @@ Compute the difference between desired spec (from YAML) and remote spec (from AP
 - Compares top-level and nested fields; produces dot-notation paths (e.g., `instructions.response`)
 - Empty vs nil handling aligned with Snowflake API expectations
 - Used by plan/apply to build update payloads; `updatePayload` in apply maps changes to top-level keys for PATCH
+- CLI previews render diff string values in full without truncation, preserving UTF-8 text such as Japanese in `plan`, `apply`, and `delete`
 
 ## Grant Package (`internal/grant`)
 

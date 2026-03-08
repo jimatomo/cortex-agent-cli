@@ -117,7 +117,7 @@ func formatChange(c diff.Change) string {
 	case diff.Removed:
 		return formatValue(c.Before)
 	default: // Modified
-		return fmt.Sprintf("%s -> %s", formatValue(c.Before), formatValue(c.After))
+		return fmt.Sprintf("%s %s %s", formatValue(c.Before), color.New(color.FgYellow).Sprint("->"), formatValue(c.After))
 	}
 }
 
@@ -128,9 +128,6 @@ func formatValue(v any) string {
 	case string:
 		if val == "" {
 			return "\"\""
-		}
-		if len(val) > 80 {
-			return fmt.Sprintf("%q...", val[:77])
 		}
 		return fmt.Sprintf("%q", val)
 	default:

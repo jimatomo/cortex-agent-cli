@@ -7,6 +7,8 @@ import (
 	"coragent/internal/api"
 	"coragent/internal/auth"
 	"coragent/internal/diff"
+
+	"github.com/fatih/color"
 )
 
 func TestFormatValue(t *testing.T) {
@@ -22,8 +24,9 @@ func TestFormatValue(t *testing.T) {
 		{"bool true", true, "true"},
 		{"bool false", false, "false"},
 		{"exactly 80 chars", strings.Repeat("x", 80), `"` + strings.Repeat("x", 80) + `"`},
-		{"81 chars truncated", strings.Repeat("x", 81), `"` + strings.Repeat("x", 77) + `"...`},
-		{"long string", strings.Repeat("a", 200), `"` + strings.Repeat("a", 77) + `"...`},
+		{"81 chars full output", strings.Repeat("x", 81), `"` + strings.Repeat("x", 81) + `"`},
+		{"long string full output", strings.Repeat("a", 200), `"` + strings.Repeat("a", 200) + `"`},
+		{"long japanese string full output", strings.Repeat("あ", 40), `"` + strings.Repeat("あ", 40) + `"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,6 +55,19 @@ func TestChangeSymbol(t *testing.T) {
 				t.Errorf("changeSymbol(%q) = %q, want to contain %q", tt.ct, got, tt.contains)
 			}
 		})
+	}
+}
+
+func TestFormatChange_ModifiedArrowColored(t *testing.T) {
+	got := formatChange(diff.Change{
+		Type:   diff.Modified,
+		Before: "before",
+		After:  "after",
+	})
+
+	want := `"before"` + " " + color.New(color.FgYellow).Sprint("->") + " " + `"after"`
+	if got != want {
+		t.Fatalf("formatChange() = %q, want %q", got, want)
 	}
 }
 
