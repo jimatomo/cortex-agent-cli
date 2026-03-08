@@ -13,9 +13,25 @@ import (
 	"github.com/spf13/cobra"
 
 	"coragent/internal/api"
+	"coragent/internal/auth"
 	"coragent/internal/config"
 	"coragent/internal/feedbackcache"
 )
+
+type feedbackClient interface {
+	FeedbackTableExists(ctx context.Context, db, schema, table string) (bool, error)
+	ClearFeedbackForAgent(ctx context.Context, db, schema, table, agentName string) error
+	GetLatestFeedbackEventTs(ctx context.Context, db, schema, table, agentName string) (string, error)
+	SyncFeedbackFromEventsToTable(ctx context.Context, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable, since string) error
+	GetFeedbackFromTable(ctx context.Context, db, schema, table, agentName string) ([]api.FeedbackTableRow, error)
+	GetFeedback(ctx context.Context, db, schema, agentName, since string) ([]api.FeedbackRecord, error)
+	UpdateFeedbackChecked(ctx context.Context, db, schema, table, recordID string, checked bool) error
+	CreateFeedbackTable(ctx context.Context, db, schema, table string) error
+}
+
+var buildFeedbackClientAndCfg = func(opts *RootOptions) (feedbackClient, auth.Config, error) {
+	return buildClientAndCfg(opts)
+}
 
 func newFeedbackCmd(opts *RootOptions) *cobra.Command {
 	var showAll bool
@@ -24,6 +40,7 @@ func newFeedbackCmd(opts *RootOptions) *cobra.Command {
 	var yes bool
 	var includeChecked bool
 	var noTools bool
+	var noRefresh bool
 	var clearCache bool
 	var initTable bool
 
@@ -49,6 +66,9 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 
   # Also show already-checked records
   coragent feedback my-agent --include-checked
+
+  # Read only the existing saved state (skip refresh/sync)
+  coragent feedback my-agent --no-refresh
 
   # JSON output
   coragent feedback my-agent --json | jq .
@@ -77,7 +97,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 
 			if clearCache {
 				if useRemote {
-					client, _, err := buildClientAndCfg(opts)
+					client, _, err := buildFeedbackClientAndCfg(opts)
 					if err != nil {
 						return err
 					}
@@ -118,22 +138,18 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 				return nil
 			}
 
-			client, cfg, err := buildClientAndCfg(opts)
-			if err != nil {
-				return err
-			}
-
-			target, err := ResolveTargetForExport(opts, cfg)
-			if err != nil {
-				return err
-			}
-
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
+			var remoteClient feedbackClient
 			var toShow []feedbackcache.Record
-			var cache *feedbackcache.Cache
+			var localCache *feedbackcache.Cache
 			if useRemote {
+				client, cfg, err := buildFeedbackClientAndCfg(opts)
+				if err != nil {
+					return err
+				}
+				remoteClient = client
 				exists, err := client.FeedbackTableExists(ctx, remoteDb, remoteSchema, remoteTable)
 				if err != nil {
 					return fmt.Errorf("check remote feedback table: %w", err)
@@ -145,13 +161,19 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 					))
 				}
 
-				// 1. Get latest event_ts from remote table for diff sync.
-				since, err := client.GetLatestFeedbackEventTs(ctx, remoteDb, remoteSchema, remoteTable, agentName)
-				if err != nil {
-					return fmt.Errorf("get latest feedback timestamp: %w", err)
-				}
-				if err := client.SyncFeedbackFromEventsToTable(ctx, target.Database, target.Schema, agentName, remoteDb, remoteSchema, remoteTable, since); err != nil {
-					return fmt.Errorf("sync feedback to remote table: %w", err)
+				if !noRefresh {
+					target, err := ResolveTargetForExport(opts, cfg)
+					if err != nil {
+						return err
+					}
+					// 1. Get latest event_ts from remote table for diff sync.
+					since, err := client.GetLatestFeedbackEventTs(ctx, remoteDb, remoteSchema, remoteTable, agentName)
+					if err != nil {
+						return fmt.Errorf("get latest feedback timestamp: %w", err)
+					}
+					if err := client.SyncFeedbackFromEventsToTable(ctx, target.Database, target.Schema, agentName, remoteDb, remoteSchema, remoteTable, since); err != nil {
+						return fmt.Errorf("sync feedback to remote table: %w", err)
+					}
 				}
 				// 2. Load records with checked state from remote table.
 				rows, err := client.GetFeedbackFromTable(ctx, remoteDb, remoteSchema, remoteTable, agentName)
@@ -161,25 +183,36 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 				toShow = mergeRemoteRows(rows, includeChecked, nil)
 			} else {
 				// 1. Load cache and determine since (latest timestamp) for diff fetch.
-				cache, err = feedbackcache.Load(agentName)
+				cache, err := feedbackcache.Load(agentName)
 				if err != nil {
 					return fmt.Errorf("load feedback cache: %w", err)
 				}
-				since := cache.LatestTimestamp()
-				// 2. Fetch only new records from Snowflake (since cache latest).
-				fresh, err := client.GetFeedback(ctx, target.Database, target.Schema, agentName, since)
-				if err != nil {
-					return err
-				}
-				cache.Merge(fresh)
-				if err := feedbackcache.Save(agentName, cache); err != nil {
-					return fmt.Errorf("save feedback cache: %w", err)
+				localCache = cache
+				if !noRefresh {
+					client, cfg, err := buildFeedbackClientAndCfg(opts)
+					if err != nil {
+						return err
+					}
+					target, err := ResolveTargetForExport(opts, cfg)
+					if err != nil {
+						return err
+					}
+					since := localCache.LatestTimestamp()
+					// 2. Fetch only new records from Snowflake (since cache latest).
+					fresh, err := client.GetFeedback(ctx, target.Database, target.Schema, agentName, since)
+					if err != nil {
+						return err
+					}
+					localCache.Merge(fresh)
+					if err := feedbackcache.Save(agentName, localCache); err != nil {
+						return fmt.Errorf("save feedback cache: %w", err)
+					}
 				}
 				// 3. Select records to display.
 				if includeChecked {
-					toShow = cache.Records
+					toShow = localCache.Records
 				} else {
-					for _, r := range cache.Records {
+					for _, r := range localCache.Records {
 						if !r.Checked {
 							toShow = append(toShow, r)
 						}
@@ -257,18 +290,18 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 
 				if confirm {
 					if useRemote {
-						if err := client.UpdateFeedbackChecked(ctx, remoteDb, remoteSchema, remoteTable, r.RecordID, true); err != nil {
+						if err := remoteClient.UpdateFeedbackChecked(ctx, remoteDb, remoteSchema, remoteTable, r.RecordID, true); err != nil {
 							return fmt.Errorf("update checked in remote table: %w", err)
 						}
 						toShow[i].Checked = true
 					} else {
-						for j := range cache.Records {
-							if cache.Records[j].RecordID == r.RecordID {
-								cache.Records[j].Checked = true
+						for j := range localCache.Records {
+							if localCache.Records[j].RecordID == r.RecordID {
+								localCache.Records[j].Checked = true
 								break
 							}
 						}
-						if err := feedbackcache.Save(agentName, cache); err != nil {
+						if err := feedbackcache.Save(agentName, localCache); err != nil {
 							return fmt.Errorf("save feedback cache: %w", err)
 						}
 					}
@@ -294,6 +327,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Auto-confirm marking each record as checked")
 	cmd.Flags().BoolVar(&includeChecked, "include-checked", false, "Also show already-checked records")
 	cmd.Flags().BoolVar(&noTools, "no-tools", false, "Hide tool invocation details (Tools, Query, SQL)")
+	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Read only existing saved feedback state; skip API fetch or remote sync")
 	cmd.Flags().BoolVar(&clearCache, "clear", false, "Clear feedback state for the agent and exit (local cache or remote table)")
 	cmd.Flags().BoolVar(&initTable, "init", false, "Ensure the remote feedback table exists (create if missing); requires feedback.remote in config")
 
@@ -312,7 +346,7 @@ func runFeedbackInit(cmd *cobra.Command, opts *RootOptions, appCfg config.Corage
 	if !appCfg.Feedback.Remote.Enabled || db == "" || schema == "" || table == "" {
 		return UserErr(fmt.Errorf("feedback --init requires [feedback.remote] in config with enabled = true, database, schema, and table"))
 	}
-	client, _, err := buildClientAndCfg(opts)
+	client, _, err := buildFeedbackClientAndCfg(opts)
 	if err != nil {
 		return err
 	}

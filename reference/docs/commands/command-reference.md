@@ -71,8 +71,8 @@ Canonical inventory of all coragent commands and subcommands, with implementatio
 - **Use:** `feedback [agent-name]`
 - **Entry:** `newFeedbackCmd` → RunE closure
 - **Dependencies:** `config.LoadCoragentConfig`, `buildClientAndCfg`, `api.GetFeedback`, `api.FeedbackTableExists`, `api.SyncFeedbackFromEventsToTable`, `api.GetFeedbackFromTable`, `feedbackcache`
-- **Side effects:** API read/write (feedback fetch, remote table sync/update/clear); feedback cache read/write in local mode; optional remote table init
-- **Flags:** `--all`, `--limit`, `--json` (returns `[]` when no records), `-y`/`--yes`, `--include-checked`, `--no-tools`, `--clear`, `--init`
+- **Side effects:** API read/write (feedback fetch, remote table sync/update/clear); feedback cache read/write in local mode; optional remote table init. With `--no-refresh`, skip API fetch in local mode and skip remote table sync in remote mode, reading only saved state before any optional checked updates.
+- **Flags:** `--all`, `--limit`, `--json` (returns `[]` when no records), `-y`/`--yes`, `--include-checked`, `--no-tools`, `--no-refresh`, `--clear`, `--init`
 
 ### login
 - **Use:** `login`

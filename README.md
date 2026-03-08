@@ -577,7 +577,7 @@ Events with `RECORD:name = 'CORTEX_AGENT_FEEDBACK'` are fetched and displayed, o
 
 Records are shown **one at a time** and after each one you are prompted to mark it as **checked**; checked records are hidden on subsequent runs. Progress is saved after each confirmation (locally or in the remote table, depending on config).
 
-By default, only negative feedback is shown. Use `--all` to show all feedback.
+By default, only negative feedback is shown. Use `--all` to show all feedback. Use `--no-refresh` to review only the already-saved state without fetching new observability events or syncing the remote feedback table.
 
 ```bash
 # Show negative (unchecked) feedback
@@ -591,6 +591,9 @@ coragent feedback my-agent -y
 
 # Also show already-checked records (displayed with [✓])
 coragent feedback my-agent --include-checked
+
+# Read only the existing saved state (skip API fetch or remote sync)
+coragent feedback my-agent --no-refresh
 
 # Limit results
 coragent feedback my-agent --limit 20
@@ -615,12 +618,13 @@ coragent feedback --init
 | `-y`, `--yes` | Auto-confirm marking each record as checked |
 | `--include-checked` | Also show already-checked records (marked with `[✓]`) |
 | `--no-tools` | Hide tool invocation details (Tools, Query, SQL) |
+| `--no-refresh` | Read only existing saved feedback state; skip API fetch in local mode or remote table sync in remote mode |
 | `--init` | Ensure the remote feedback table exists (create if missing); requires `[feedback.remote]` in config |
 | `--clear` | Clear feedback state for the agent and exit (local cache in local mode, remote rows in remote mode) |
 
 ### Remote feedback table
 
-When `[feedback.remote]` is enabled in `.coragent.toml` or `~/.coragent/config.toml`, run `coragent feedback --init` once to create the table if it does not exist. The table stores raw feedback payload (`raw_value`) and raw request payload (`request_raw`), flattened columns (sentiment, comment, question, response, tool_uses, etc.), and a `checked` flag with `checked_at` timestamp. If the table already exists, `feedback --init` prompts for confirmation before running `CREATE OR REPLACE TABLE` (which recreates the table and drops existing rows). The role must have `CREATE TABLE` (for `--init`) and `INSERT`/`UPDATE`/`SELECT`/`DELETE` on the target database and schema.
+When `[feedback.remote]` is enabled in `.coragent.toml` or `~/.coragent/config.toml`, run `coragent feedback --init` once to create the table if it does not exist. The table stores flattened feedback fields (sentiment, feedback_message, categories, question, response, `tool_uses`, `request_value`, etc.) plus a `checked` flag with `checked_at` timestamp. If the table already exists, `feedback --init` prompts for confirmation before running `CREATE OR REPLACE TABLE` (which recreates the table and drops existing rows). Use `coragent feedback --no-refresh` to read the existing rows without syncing in new observability events first. The role must have `CREATE TABLE` (for `--init`) and `INSERT`/`UPDATE`/`SELECT`/`DELETE` on the target database and schema.
 
 ### Requirements
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,11 +10,79 @@ import (
 	"testing"
 
 	"coragent/internal/api"
-	"coragent/internal/feedbackcache"
+	"coragent/internal/auth"
 	"coragent/internal/config"
+	"coragent/internal/feedbackcache"
 
 	"github.com/spf13/cobra"
 )
+
+type stubFeedbackClient struct {
+	feedbackTableExistsFn      func(ctx context.Context, db, schema, table string) (bool, error)
+	clearFeedbackForAgentFn    func(ctx context.Context, db, schema, table, agentName string) error
+	getLatestFeedbackEventTsFn func(ctx context.Context, db, schema, table, agentName string) (string, error)
+	syncFeedbackFromEventsToFn func(ctx context.Context, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable, since string) error
+	getFeedbackFromTableFn     func(ctx context.Context, db, schema, table, agentName string) ([]api.FeedbackTableRow, error)
+	getFeedbackFn              func(ctx context.Context, db, schema, agentName, since string) ([]api.FeedbackRecord, error)
+	updateFeedbackCheckedFn    func(ctx context.Context, db, schema, table, recordID string, checked bool) error
+	createFeedbackTableFn      func(ctx context.Context, db, schema, table string) error
+}
+
+func (s *stubFeedbackClient) FeedbackTableExists(ctx context.Context, db, schema, table string) (bool, error) {
+	if s.feedbackTableExistsFn != nil {
+		return s.feedbackTableExistsFn(ctx, db, schema, table)
+	}
+	return false, nil
+}
+
+func (s *stubFeedbackClient) ClearFeedbackForAgent(ctx context.Context, db, schema, table, agentName string) error {
+	if s.clearFeedbackForAgentFn != nil {
+		return s.clearFeedbackForAgentFn(ctx, db, schema, table, agentName)
+	}
+	return nil
+}
+
+func (s *stubFeedbackClient) GetLatestFeedbackEventTs(ctx context.Context, db, schema, table, agentName string) (string, error) {
+	if s.getLatestFeedbackEventTsFn != nil {
+		return s.getLatestFeedbackEventTsFn(ctx, db, schema, table, agentName)
+	}
+	return "", nil
+}
+
+func (s *stubFeedbackClient) SyncFeedbackFromEventsToTable(ctx context.Context, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable, since string) error {
+	if s.syncFeedbackFromEventsToFn != nil {
+		return s.syncFeedbackFromEventsToFn(ctx, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable, since)
+	}
+	return nil
+}
+
+func (s *stubFeedbackClient) GetFeedbackFromTable(ctx context.Context, db, schema, table, agentName string) ([]api.FeedbackTableRow, error) {
+	if s.getFeedbackFromTableFn != nil {
+		return s.getFeedbackFromTableFn(ctx, db, schema, table, agentName)
+	}
+	return nil, nil
+}
+
+func (s *stubFeedbackClient) GetFeedback(ctx context.Context, db, schema, agentName, since string) ([]api.FeedbackRecord, error) {
+	if s.getFeedbackFn != nil {
+		return s.getFeedbackFn(ctx, db, schema, agentName, since)
+	}
+	return nil, nil
+}
+
+func (s *stubFeedbackClient) UpdateFeedbackChecked(ctx context.Context, db, schema, table, recordID string, checked bool) error {
+	if s.updateFeedbackCheckedFn != nil {
+		return s.updateFeedbackCheckedFn(ctx, db, schema, table, recordID, checked)
+	}
+	return nil
+}
+
+func (s *stubFeedbackClient) CreateFeedbackTable(ctx context.Context, db, schema, table string) error {
+	if s.createFeedbackTableFn != nil {
+		return s.createFeedbackTableFn(ctx, db, schema, table)
+	}
+	return nil
+}
 
 func TestResolveFeedbackRemote(t *testing.T) {
 	tests := []struct {
@@ -75,6 +144,113 @@ func TestRunFeedbackInit_RequiresRemoteConfig(t *testing.T) {
 	}
 	if err.Error() == "" || len(err.Error()) < 10 {
 		t.Errorf("error message too short: %q", err.Error())
+	}
+}
+
+func TestFeedbackNoRefresh_LocalModeSkipsFetch(t *testing.T) {
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origDir) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Setenv("HOME", dir)
+
+	if err := feedbackcache.Save("my-agent", &feedbackcache.Cache{
+		Records: []feedbackcache.Record{
+			{
+				FeedbackRecord: api.FeedbackRecord{
+					RecordID:  "cached-1",
+					Timestamp: "2026-03-08 00:00:00.000 UTC",
+					UserName:  "alice",
+					Sentiment: "negative",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	origBuild := buildFeedbackClientAndCfg
+	t.Cleanup(func() { buildFeedbackClientAndCfg = origBuild })
+	buildFeedbackClientAndCfg = func(opts *RootOptions) (feedbackClient, auth.Config, error) {
+		t.Fatal("buildFeedbackClientAndCfg should not be called in local --no-refresh mode")
+		return nil, auth.Config{}, nil
+	}
+
+	var out bytes.Buffer
+	cmd := newFeedbackCmd(&RootOptions{})
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"my-agent", "--no-refresh", "--json"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(out.String(), `"record_id": "cached-1"`) {
+		t.Fatalf("expected cached record in output, got:\n%s", out.String())
+	}
+}
+
+func TestFeedbackNoRefresh_RemoteModeSkipsSync(t *testing.T) {
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origDir) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Setenv("HOME", dir)
+
+	if err := os.WriteFile(".coragent.toml", []byte(`[feedback.remote]
+enabled = true
+database = "REMOTE_DB"
+schema = "REMOTE_SCHEMA"
+table = "AGENT_FEEDBACK"
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	client := &stubFeedbackClient{
+		feedbackTableExistsFn: func(ctx context.Context, db, schema, table string) (bool, error) {
+			return true, nil
+		},
+		getLatestFeedbackEventTsFn: func(ctx context.Context, db, schema, table, agentName string) (string, error) {
+			t.Fatal("GetLatestFeedbackEventTs should not be called when --no-refresh is set")
+			return "", nil
+		},
+		syncFeedbackFromEventsToFn: func(ctx context.Context, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable, since string) error {
+			t.Fatal("SyncFeedbackFromEventsToTable should not be called when --no-refresh is set")
+			return nil
+		},
+		getFeedbackFromTableFn: func(ctx context.Context, db, schema, table, agentName string) ([]api.FeedbackTableRow, error) {
+			return []api.FeedbackTableRow{
+				{
+					FeedbackRecord: api.FeedbackRecord{
+						RecordID:  "remote-1",
+						Timestamp: "2026-03-08 00:00:00.000 UTC",
+						UserName:  "bob",
+						Sentiment: "negative",
+					},
+				},
+			}, nil
+		},
+	}
+
+	origBuild := buildFeedbackClientAndCfg
+	t.Cleanup(func() { buildFeedbackClientAndCfg = origBuild })
+	buildFeedbackClientAndCfg = func(opts *RootOptions) (feedbackClient, auth.Config, error) {
+		return client, auth.Config{}, nil
+	}
+
+	var out bytes.Buffer
+	cmd := newFeedbackCmd(&RootOptions{})
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"my-agent", "--no-refresh", "--json"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(out.String(), `"record_id": "remote-1"`) {
+		t.Fatalf("expected remote record in output, got:\n%s", out.String())
 	}
 }
 

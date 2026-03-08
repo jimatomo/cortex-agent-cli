@@ -44,6 +44,7 @@ Cache feedback records locally to support incremental review and "checked" filte
 - **Format:** JSON array of feedback records
 - **Merge:** New records from `GetFeedback` merged with cache; duplicates avoided
 - **Checked:** Records can be marked checked; `--include-checked` shows them; default hides
+- **No refresh:** `feedback --no-refresh` reads the existing cache as-is and skips `GetFeedback` plus cache rewrite
 
 ## Thread (`internal/thread`)
 

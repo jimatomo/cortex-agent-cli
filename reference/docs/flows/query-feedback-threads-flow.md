@@ -35,14 +35,15 @@ These flows cover agent execution (`run`), feedback retrieval (`feedback`), and 
 
 1. **Remote table mode** — When `feedback.remote.enabled` in `.coragent.toml` and remote DB/schema/table are configured: sync events into the remote table, then read/update records from that table
 2. **API + local cache mode** — Uses `GetFeedback` REST API and local cache when remote mode is not configured
-3. **Init** — `--init` creates the remote feedback table when using remote mode
+3. **No-refresh read-only mode** — With `--no-refresh`, skip new-event fetch/sync and read only the existing local cache or existing remote table rows before any optional checked updates
+4. **Init** — `--init` creates the remote feedback table when using remote mode
 
 ### Steps
 
 1. Load `config.LoadCoragentConfig()` for feedback settings
 2. Resolve remote DB/schema/table if enabled
-3. If remote mode: ensure table exists, sync new events (`SyncFeedbackFromEventsToTable`), then fetch rows (`GetFeedbackFromTable`)
-4. If local mode: fetch incremental feedback via API (`GetFeedback`) and merge with local cache (`~/.coragent/feedback/<agent>.json`)
+3. If remote mode: ensure table exists, optionally sync new events (`SyncFeedbackFromEventsToTable`) unless `--no-refresh`, then fetch rows (`GetFeedbackFromTable`)
+4. If local mode: load local cache (`~/.coragent/feedback/<agent>.json`), optionally fetch incremental feedback via API (`GetFeedback`) unless `--no-refresh`, then merge and save
 5. Display records (default negative only; `--all` for all). Response bodies are printed in full without truncation in the interactive text output
 6. Prompt to mark as checked; update remote table or local cache depending on mode
 
