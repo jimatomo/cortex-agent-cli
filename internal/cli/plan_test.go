@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
+	"coragent/internal/agent"
 	"coragent/internal/api"
 	"coragent/internal/auth"
 	"coragent/internal/diff"
+	"coragent/internal/grant"
 
 	"github.com/fatih/color"
 )
@@ -173,5 +176,64 @@ func TestPlanToGrantRows_TypeConversion(t *testing.T) {
 	result := convertGrantRows(input)
 	if result[0].Privilege != "USAGE" {
 		t.Errorf("unexpected Privilege: %q", result[0].Privilege)
+	}
+}
+
+func TestWritePlanPreview_HidesUnchangedItems(t *testing.T) {
+	items := []applyItem{
+		{
+			Parsed: agent.ParsedAgent{
+				Path: "unchanged.yaml",
+				Spec: agent.AgentSpec{Name: "UNCHANGED"},
+			},
+			Target: Target{Database: "TEST_DB", Schema: "PUBLIC"},
+			Exists: true,
+		},
+		{
+			Parsed: agent.ParsedAgent{
+				Path: "updated.yaml",
+				Spec: agent.AgentSpec{Name: "UPDATED"},
+			},
+			Target: Target{Database: "TEST_DB", Schema: "PUBLIC"},
+			Exists: true,
+			Changes: []diff.Change{
+				{Path: "comment", Type: diff.Modified, Before: "old", After: "new"},
+			},
+		},
+		{
+			Parsed: agent.ParsedAgent{
+				Path: "created.yaml",
+				Spec: agent.AgentSpec{Name: "CREATED", Comment: "brand new"},
+			},
+			Target:    Target{Database: "TEST_DB", Schema: "PUBLIC"},
+			Exists:    false,
+			GrantDiff: grant.GrantDiff{},
+		},
+	}
+
+	var buf bytes.Buffer
+	summary, err := writePlanPreview(&buf, items)
+	if err != nil {
+		t.Fatalf("writePlanPreview: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "UNCHANGED:") {
+		t.Fatalf("unchanged item should be hidden, got output:\n%s", out)
+	}
+	if strings.Contains(out, "= no changes") {
+		t.Fatalf("no-change marker should not be shown, got output:\n%s", out)
+	}
+	if !strings.Contains(out, "UPDATED:") {
+		t.Fatalf("updated item missing from output:\n%s", out)
+	}
+	if !strings.Contains(out, "CREATED:") {
+		t.Fatalf("created item missing from output:\n%s", out)
+	}
+	if !strings.Contains(out, `Plan: 1 to create, 1 to update, 1 unchanged`) {
+		t.Fatalf("summary missing expected counts, got output:\n%s", out)
+	}
+	if summary.createCount != 1 || summary.updateCount != 1 || summary.noChangeCount != 1 {
+		t.Fatalf("unexpected summary: %+v", summary)
 	}
 }

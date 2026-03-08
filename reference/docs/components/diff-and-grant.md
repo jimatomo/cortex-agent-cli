@@ -23,6 +23,7 @@ Compute the difference between desired spec (from YAML) and remote spec (from AP
 - Empty vs nil handling aligned with Snowflake API expectations
 - Used by plan/apply to build update payloads; `updatePayload` in apply maps changes to top-level keys for PATCH
 - CLI previews render diff string values in full without truncation, preserving UTF-8 text such as Japanese in `plan`, `apply`, and `delete`
+- In `plan` and the `apply` preview, unchanged agents are omitted from the detailed body; only create/update targets are shown, while unchanged counts remain in the summary
 
 ## Grant Package (`internal/grant`)
 

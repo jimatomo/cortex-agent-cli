@@ -61,57 +61,12 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var createCount, updateCount, noChangeCount int
-			for _, item := range planItems {
-				if !item.Exists {
-					createCount++
-				} else if diff.HasChanges(item.Changes) || item.GrantDiff.HasChanges() {
-					updateCount++
-				} else {
-					noChangeCount++
-				}
+
+			summary, err := writePlanPreview(os.Stdout, planItems)
+			if err != nil {
+				return err
 			}
-
-			// Show detailed plan output
-			for _, item := range planItems {
-				fmt.Fprintf(os.Stdout, "%s:\n", item.Parsed.Spec.Name)
-				fmt.Fprintf(os.Stdout, "  database: %s\n", item.Target.Database)
-				fmt.Fprintf(os.Stdout, "  schema:   %s\n", item.Target.Schema)
-
-				if !item.Exists {
-					color.New(color.FgGreen).Fprintln(os.Stdout, "  + create")
-					// Show what will be created
-					createChanges, err := diff.DiffForCreate(item.Parsed.Spec)
-					if err != nil {
-						return fmt.Errorf("%s: %w", item.Parsed.Path, err)
-					}
-					for _, c := range createChanges {
-						fmt.Fprintf(os.Stdout, "    %s %s: %s\n",
-							color.New(color.FgGreen).Sprint("+"),
-							c.Path,
-							formatValue(c.After),
-						)
-					}
-					showApplyGrantPlan(item.GrantDiff)
-					continue
-				}
-
-				if !diff.HasChanges(item.Changes) && !item.GrantDiff.HasChanges() {
-					color.New(color.FgCyan).Fprintln(os.Stdout, "  = no changes")
-					continue
-				}
-				for _, c := range item.Changes {
-					fmt.Fprintf(os.Stdout, "  %s %s: %s\n",
-						changeSymbol(c.Type),
-						c.Path,
-						formatChange(c),
-					)
-				}
-				showApplyGrantPlan(item.GrantDiff)
-			}
-
-			fmt.Fprintf(os.Stdout, "\nPlan: %d to create, %d to update, %d unchanged\n", createCount, updateCount, noChangeCount)
-			if createCount+updateCount == 0 {
+			if summary.createCount+summary.updateCount == 0 {
 				return nil
 			}
 
@@ -125,7 +80,7 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 			for _, item := range planItems {
 				if !item.Exists {
 					color.New(color.FgGreen).Fprintf(os.Stdout, "Creating %s...\n", item.Parsed.Spec.Name)
-				} else if diff.HasChanges(item.Changes) {
+				} else if diff.HasChanges(item.Changes) || item.GrantDiff.HasChanges() {
 					color.New(color.FgYellow).Fprintf(os.Stdout, "Updating %s...\n", item.Parsed.Spec.Name)
 				} else {
 					color.New(color.FgCyan).Fprintf(os.Stdout, "No changes for %s\n", item.Parsed.Spec.Name)
@@ -239,29 +194,4 @@ func topLevel(path string) string {
 		return ""
 	}
 	return strings.Split(parts[0], "[")[0]
-}
-
-// showApplyGrantPlan displays the grant diff in apply plan output.
-func showApplyGrantPlan(diff grant.GrantDiff) {
-	if !diff.HasChanges() {
-		return
-	}
-
-	fmt.Fprintf(os.Stdout, "  grants:\n")
-
-	for _, e := range diff.ToRevoke {
-		fmt.Fprintf(os.Stdout, "    %s %s TO %s %s\n",
-			color.New(color.FgRed).Sprint("-"),
-			e.Privilege,
-			e.RoleType,
-			e.RoleName)
-	}
-
-	for _, e := range diff.ToGrant {
-		fmt.Fprintf(os.Stdout, "    %s %s TO %s %s\n",
-			color.New(color.FgGreen).Sprint("+"),
-			e.Privilege,
-			e.RoleType,
-			e.RoleName)
-	}
 }
