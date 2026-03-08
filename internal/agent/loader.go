@@ -142,6 +142,14 @@ func loadFromFile(path string, envName string) (AgentSpec, error) {
 		return AgentSpec{}, fmt.Errorf("parse YAML %q: %w", path, err)
 	}
 
+	if spec.Deploy != nil && spec.Deploy.Grant != nil {
+		resolvedGrant, err := resolveGrantConfig(spec.Deploy.Grant, envName)
+		if err != nil {
+			return AgentSpec{}, fmt.Errorf("validate YAML %q: grant: %w", path, err)
+		}
+		spec.Deploy.Grant = resolvedGrant
+	}
+
 	if err := validateAgentSpec(spec); err != nil {
 		return AgentSpec{}, fmt.Errorf("validate YAML %q: %w", path, err)
 	}
@@ -182,38 +190,126 @@ func validateAgentSpec(spec AgentSpec) error {
 	return nil
 }
 
+func resolveGrantConfig(grant *GrantConfig, envName string) (*GrantConfig, error) {
+	if grant == nil {
+		return nil, nil
+	}
+
+	if len(grant.Envs) == 0 {
+		return grant, nil
+	}
+	if len(grant.AccountRoles) > 0 || len(grant.DatabaseRoles) > 0 {
+		return nil, fmt.Errorf("cannot mix flat grant fields with grant.envs")
+	}
+
+	if err := validateGrantEnvs(grant.Envs); err != nil {
+		return nil, err
+	}
+
+	defaultGrant, hasDefault := grant.Envs["default"]
+	if envName == "" {
+		if !hasDefault {
+			return nil, fmt.Errorf("envs.default is required when grant.envs is used without --env")
+		}
+		return grantConfigFromEnv(defaultGrant, GrantEnvConfig{}), nil
+	}
+
+	selectedGrant, hasSelected := grant.Envs[envName]
+	if !hasSelected && !hasDefault {
+		return nil, fmt.Errorf("grant.envs: environment %q not found and no default defined", envName)
+	}
+
+	return grantConfigFromEnv(selectedGrant, defaultGrant), nil
+}
+
+func validateGrantEnvs(envs map[string]GrantEnvConfig) error {
+	for name, cfg := range envs {
+		if err := validateGrantEnvConfig(cfg); err != nil {
+			return fmt.Errorf("envs.%s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func validateGrantEnvConfig(cfg GrantEnvConfig) error {
+	if cfg.AccountRoles != nil {
+		if err := validateRoleGrants(*cfg.AccountRoles, false, "account_roles"); err != nil {
+			return err
+		}
+	}
+	if cfg.DatabaseRoles != nil {
+		if err := validateRoleGrants(*cfg.DatabaseRoles, true, "database_roles"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func grantConfigFromEnv(selected, fallback GrantEnvConfig) *GrantConfig {
+	return &GrantConfig{
+		AccountRoles:  resolveGrantRoleList(selected.AccountRoles, fallback.AccountRoles),
+		DatabaseRoles: resolveGrantRoleList(selected.DatabaseRoles, fallback.DatabaseRoles),
+	}
+}
+
+func resolveGrantRoleList(selected, fallback *[]RoleGrant) []RoleGrant {
+	if selected != nil {
+		return cloneRoleGrants(*selected)
+	}
+	if fallback != nil {
+		return cloneRoleGrants(*fallback)
+	}
+	return nil
+}
+
+func cloneRoleGrants(in []RoleGrant) []RoleGrant {
+	if in == nil {
+		return nil
+	}
+	out := make([]RoleGrant, len(in))
+	copy(out, in)
+	return out
+}
+
 func validateGrantConfig(grant *GrantConfig) error {
+	if len(grant.Envs) > 0 {
+		if len(grant.AccountRoles) > 0 || len(grant.DatabaseRoles) > 0 {
+			return fmt.Errorf("cannot mix flat grant fields with grant.envs")
+		}
+		return validateGrantEnvs(grant.Envs)
+	}
+
+	if len(grant.AccountRoles) == 0 && len(grant.DatabaseRoles) == 0 {
+		return nil
+	}
+
+	if err := validateRoleGrants(grant.AccountRoles, false, "account_roles"); err != nil {
+		return err
+	}
+	if err := validateRoleGrants(grant.DatabaseRoles, true, "database_roles"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateRoleGrants(grants []RoleGrant, requireQualifiedRole bool, fieldName string) error {
 	validPrivileges := map[string]bool{
 		"USAGE": true, "MODIFY": true, "MONITOR": true, "ALL": true,
 	}
 
-	for i, rg := range grant.AccountRoles {
+	for i, rg := range grants {
 		if strings.TrimSpace(rg.Role) == "" {
-			return fmt.Errorf("account_roles[%d].role is required", i)
+			return fmt.Errorf("%s[%d].role is required", fieldName, i)
+		}
+		if requireQualifiedRole && !strings.Contains(rg.Role, ".") {
+			return fmt.Errorf("%s[%d].role: %q must be fully qualified (DB.ROLE_NAME)", fieldName, i, rg.Role)
 		}
 		if len(rg.Privileges) == 0 {
-			return fmt.Errorf("account_roles[%d].privileges is required", i)
+			return fmt.Errorf("%s[%d].privileges is required", fieldName, i)
 		}
 		for j, priv := range rg.Privileges {
 			if !validPrivileges[strings.ToUpper(priv)] {
-				return fmt.Errorf("account_roles[%d].privileges[%d]: invalid privilege %q (valid: USAGE, MODIFY, MONITOR, ALL)", i, j, priv)
-			}
-		}
-	}
-
-	for i, rg := range grant.DatabaseRoles {
-		if strings.TrimSpace(rg.Role) == "" {
-			return fmt.Errorf("database_roles[%d].role is required", i)
-		}
-		if !strings.Contains(rg.Role, ".") {
-			return fmt.Errorf("database_roles[%d].role: %q must be fully qualified (DB.ROLE_NAME)", i, rg.Role)
-		}
-		if len(rg.Privileges) == 0 {
-			return fmt.Errorf("database_roles[%d].privileges is required", i)
-		}
-		for j, priv := range rg.Privileges {
-			if !validPrivileges[strings.ToUpper(priv)] {
-				return fmt.Errorf("database_roles[%d].privileges[%d]: invalid privilege %q (valid: USAGE, MODIFY, MONITOR, ALL)", i, j, priv)
+				return fmt.Errorf("%s[%d].privileges[%d]: invalid privilege %q (valid: USAGE, MODIFY, MONITOR, ALL)", fieldName, i, j, priv)
 			}
 		}
 	}

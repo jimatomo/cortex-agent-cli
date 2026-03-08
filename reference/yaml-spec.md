@@ -22,14 +22,21 @@ deploy:
   schema: ${ vars.SNOWFLAKE_SCHEMA }
   quote_identifiers: true
   grant:
-    account_roles:
-      - role: ANALYST
-        privileges:
-          - ALL
-    database_roles:
-      - role: ${ vars.SNOWFLAKE_DATABASE }.CORTEX_MONITOR
-        privileges:
-          - MONITOR
+    envs:
+      default:
+        account_roles:
+          - role: ANALYST
+            privileges:
+              - USAGE
+      prod:
+        account_roles:
+          - role: ANALYST
+            privileges:
+              - ALL
+        database_roles:
+          - role: ${ vars.SNOWFLAKE_DATABASE }.CORTEX_MONITOR
+            privileges:
+              - MONITOR
 
 eval:
   judge_model: claude-3-5-sonnet
@@ -221,6 +228,48 @@ tool_resources:
 At least one of `expected_tools`, `expected_response`, or `command` is required per test.
 
 ## `deploy.grant` Privileges
+
+`deploy.grant` supports two mutually exclusive forms:
+
+1. Flat grant definitions:
+
+```yaml
+deploy:
+  grant:
+    account_roles:
+      - role: ANALYST
+        privileges: [USAGE]
+    database_roles:
+      - role: MY_DB.CORTEX_MONITOR
+        privileges: [MONITOR]
+```
+
+2. Env-specific grant definitions:
+
+```yaml
+deploy:
+  grant:
+    envs:
+      default:
+        account_roles:
+          - role: ANALYST
+            privileges: [USAGE]
+      prod:
+        account_roles:
+          - role: ANALYST
+            privileges: [ALL]
+        database_roles:
+          - role: PROD_DB.CORTEX_MONITOR
+            privileges: [MONITOR]
+```
+
+When `deploy.grant.envs` is used:
+
+1. `--env <name>` selects `deploy.grant.envs.<name>`
+2. Any missing `account_roles` / `database_roles` fall back to `deploy.grant.envs.default`
+3. If `--env` is omitted, only `deploy.grant.envs.default` is used
+4. An explicit empty list such as `account_roles: []` clears the inherited grants for that env
+5. Flat fields (`account_roles`, `database_roles`) cannot be mixed with `envs` in the same `deploy.grant`
 
 | Privilege | Description |
 |-----------|-------------|

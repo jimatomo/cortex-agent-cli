@@ -164,6 +164,53 @@ func TestValidate_GrantEmptyPrivileges(t *testing.T) {
 	}
 }
 
+func TestValidate_GrantEnvMixedConfig(t *testing.T) {
+	spec := AgentSpec{
+		Name: "agent",
+		Deploy: &DeployConfig{
+			Grant: &GrantConfig{
+				AccountRoles: []RoleGrant{{Role: "ANALYST", Privileges: []string{"USAGE"}}},
+				Envs: map[string]GrantEnvConfig{
+					"default": {
+						AccountRoles: &[]RoleGrant{{Role: "OTHER_ROLE", Privileges: []string{"MONITOR"}}},
+					},
+				},
+			},
+		},
+	}
+
+	err := spec.Validate()
+	if err == nil {
+		t.Fatal("expected error for mixed flat grant and grant envs")
+	}
+	if !strings.Contains(err.Error(), "cannot mix flat grant fields with grant.envs") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_GrantEnvInvalidDatabaseRole(t *testing.T) {
+	spec := AgentSpec{
+		Name: "agent",
+		Deploy: &DeployConfig{
+			Grant: &GrantConfig{
+				Envs: map[string]GrantEnvConfig{
+					"default": {
+						DatabaseRoles: &[]RoleGrant{{Role: "UNQUALIFIED_ROLE", Privileges: []string{"USAGE"}}},
+					},
+				},
+			},
+		},
+	}
+
+	err := spec.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid database role in grant env")
+	}
+	if !strings.Contains(err.Error(), "must be fully qualified") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidate_FullValidSpec(t *testing.T) {
 	threshold := 70
 	spec := AgentSpec{

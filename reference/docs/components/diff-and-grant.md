@@ -34,6 +34,7 @@ Compute and execute GRANT/REVOKE diffs to converge agent privileges to the desir
 ### Key Types
 
 - **GrantConfig** — From `spec.Deploy.Grant`; `AccountRoles`, `DatabaseRoles`
+- **GrantEnvConfig** — Optional env-specific grant block under `deploy.grant.envs.<name>`
 - **GrantState** — Current state from `ShowGrants` rows
 - **GrantDiff** — `ToGrant`, `ToRevoke`; `HasChanges()`
 
@@ -43,6 +44,16 @@ Compute and execute GRANT/REVOKE diffs to converge agent privileges to the desir
 - **FromShowGrantsRows(rows)** — Convert API rows to current state
 - **ComputeDiff(desired, current)** — Returns `GrantDiff` with ToGrant and ToRevoke
 - **applyGrantDiff** (in cli) — Executes REVOKE first, then GRANT
+
+### Env Resolution
+
+Before diff/apply logic runs, `internal/agent/loader.go` resolves `deploy.grant.envs` into a flat `GrantConfig`:
+
+- `--env <name>` selects `envs.<name>`
+- Missing `account_roles` / `database_roles` fall back to `envs.default`
+- `--env` omitted uses `envs.default` only
+- `account_roles: []` or `database_roles: []` explicitly clears inherited grants for that env
+- Flat `deploy.grant.account_roles` / `database_roles` cannot be mixed with `deploy.grant.envs`
 
 ### Privileges
 

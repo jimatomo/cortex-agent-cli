@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -331,6 +332,163 @@ deploy:
 	}
 	if agents[0].Spec.Deploy.Grant.DatabaseRoles[0].Role != "TEST_DB.DATA_READER" {
 		t.Errorf("expected role TEST_DB.DATA_READER, got %s", agents[0].Spec.Deploy.Grant.DatabaseRoles[0].Role)
+	}
+}
+
+func TestLoadAgentWithGrantEnvsSelected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+deploy:
+  grant:
+    envs:
+      default:
+        account_roles:
+          - role: ANALYST_ROLE
+            privileges:
+              - USAGE
+        database_roles:
+          - role: TEST_DB.DEFAULT_READER
+            privileges:
+              - MONITOR
+      prod:
+        account_roles:
+          - role: PROD_ROLE
+            privileges:
+              - ALL
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false, "prod")
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+
+	grant := agents[0].Spec.Deploy.Grant
+	if grant == nil {
+		t.Fatal("expected Grant to be non-nil")
+	}
+	if len(grant.AccountRoles) != 1 {
+		t.Fatalf("expected 1 account role, got %d", len(grant.AccountRoles))
+	}
+	if grant.AccountRoles[0].Role != "PROD_ROLE" {
+		t.Fatalf("expected PROD_ROLE, got %s", grant.AccountRoles[0].Role)
+	}
+	if len(grant.DatabaseRoles) != 1 {
+		t.Fatalf("expected default database role fallback, got %d", len(grant.DatabaseRoles))
+	}
+	if grant.DatabaseRoles[0].Role != "TEST_DB.DEFAULT_READER" {
+		t.Fatalf("expected TEST_DB.DEFAULT_READER, got %s", grant.DatabaseRoles[0].Role)
+	}
+	if len(grant.Envs) != 0 {
+		t.Fatalf("expected env grants to be resolved away, got %+v", grant.Envs)
+	}
+}
+
+func TestLoadAgentWithGrantEnvsDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+deploy:
+  grant:
+    envs:
+      default:
+        account_roles:
+          - role: ANALYST_ROLE
+            privileges:
+              - USAGE
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false, "")
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+
+	grant := agents[0].Spec.Deploy.Grant
+	if grant == nil {
+		t.Fatal("expected Grant to be non-nil")
+	}
+	if len(grant.AccountRoles) != 1 || grant.AccountRoles[0].Role != "ANALYST_ROLE" {
+		t.Fatalf("unexpected resolved account roles: %+v", grant.AccountRoles)
+	}
+}
+
+func TestLoadAgentWithGrantEnvsExplicitEmptyOverride(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+deploy:
+  grant:
+    envs:
+      default:
+        account_roles:
+          - role: ANALYST_ROLE
+            privileges:
+              - USAGE
+        database_roles:
+          - role: TEST_DB.DEFAULT_READER
+            privileges:
+              - MONITOR
+      dev:
+        account_roles: []
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	agents, err := LoadAgents(path, false, "dev")
+	if err != nil {
+		t.Fatalf("LoadAgents error: %v", err)
+	}
+
+	grant := agents[0].Spec.Deploy.Grant
+	if grant == nil {
+		t.Fatal("expected Grant to be non-nil")
+	}
+	if len(grant.AccountRoles) != 0 {
+		t.Fatalf("expected account roles to be cleared, got %+v", grant.AccountRoles)
+	}
+	if len(grant.DatabaseRoles) != 1 || grant.DatabaseRoles[0].Role != "TEST_DB.DEFAULT_READER" {
+		t.Fatalf("expected database role fallback, got %+v", grant.DatabaseRoles)
+	}
+}
+
+func TestLoadAgentRejectsMixedGrantAndGrantEnvs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	err := os.WriteFile(path, []byte(`
+name: test-agent
+deploy:
+  grant:
+    account_roles:
+      - role: ANALYST_ROLE
+        privileges:
+          - USAGE
+    envs:
+      default:
+        account_roles:
+          - role: OTHER_ROLE
+            privileges:
+              - MONITOR
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	_, err = LoadAgents(path, false, "")
+	if err == nil {
+		t.Fatal("expected error for mixed flat grant fields and grant.envs, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot mix flat grant fields with grant.envs") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

@@ -9,17 +9,24 @@ deploy:
   database: ${ vars.SNOWFLAKE_DATABASE }
   schema: ${ vars.SNOWFLAKE_SCHEMA }
   grant:
-    account_roles:
-      - role: ANALYST
-        privileges:
-          - ALL
-    database_roles:
-      # - role: ${ vars.SNOWFLAKE_DATABASE }.CORTEX_USER
-      #   privileges:
-      #     - USAGE
-      - role: ${ vars.SNOWFLAKE_DATABASE }.CORTEX_MONITOR
-        privileges:
-          - MONITOR
+    envs:
+      default:
+        account_roles:
+          - role: ANALYST
+            privileges:
+              - USAGE
+      prod:
+        account_roles:
+          - role: ANALYST
+            privileges:
+              - ALL
+        database_roles:
+          # - role: ${ vars.SNOWFLAKE_DATABASE }.CORTEX_USER
+          #   privileges:
+          #     - USAGE
+          - role: ${ vars.SNOWFLAKE_DATABASE }.CORTEX_MONITOR
+            privileges:
+              - MONITOR
 
 eval:
   tests:

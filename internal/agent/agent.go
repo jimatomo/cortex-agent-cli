@@ -14,11 +14,26 @@ type RoleGrant struct {
 
 // GrantConfig specifies role grants to apply whenever the agent is deployed.
 // Corresponds to the deploy.grant block in the YAML spec.
+type GrantEnvConfig struct {
+	// AccountRoles optionally overrides account-level role grants for a named env.
+	// A present-but-empty list explicitly clears the inherited grants.
+	AccountRoles *[]RoleGrant `yaml:"account_roles,omitempty" json:"account_roles,omitempty"`
+	// DatabaseRoles optionally overrides database-level role grants for a named env.
+	// A present-but-empty list explicitly clears the inherited grants.
+	DatabaseRoles *[]RoleGrant `yaml:"database_roles,omitempty" json:"database_roles,omitempty"`
+}
+
+// GrantConfig specifies role grants to apply whenever the agent is deployed.
+// It supports either a flat grant definition or env-specific definitions under
+// deploy.grant.envs, which are resolved during YAML loading.
 type GrantConfig struct {
 	// AccountRoles lists account-level role grants (GRANT … TO ROLE …).
 	AccountRoles []RoleGrant `yaml:"account_roles,omitempty" json:"account_roles,omitempty"`
 	// DatabaseRoles lists database-level role grants (GRANT … TO DATABASE ROLE …).
 	DatabaseRoles []RoleGrant `yaml:"database_roles,omitempty" json:"database_roles,omitempty"`
+	// Envs contains optional env-specific grant overrides keyed by env name.
+	// These are resolved during YAML loading and are not used by downstream diff/apply code.
+	Envs map[string]GrantEnvConfig `yaml:"envs,omitempty" json:"envs,omitempty"`
 }
 
 // DeployConfig contains deployment-only settings that are not sent to the

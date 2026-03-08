@@ -55,22 +55,8 @@ func (s AgentSpec) Validate() error {
 
 	// Validate grant config
 	if s.Deploy != nil && s.Deploy.Grant != nil {
-		g := s.Deploy.Grant
-		for i, rg := range g.AccountRoles {
-			if rg.Role == "" {
-				return fmt.Errorf("deploy.grant.account_roles[%d]: role is required", i)
-			}
-			if len(rg.Privileges) == 0 {
-				return fmt.Errorf("deploy.grant.account_roles[%d]: privileges must not be empty", i)
-			}
-		}
-		for i, rg := range g.DatabaseRoles {
-			if rg.Role == "" {
-				return fmt.Errorf("deploy.grant.database_roles[%d]: role is required", i)
-			}
-			if len(rg.Privileges) == 0 {
-				return fmt.Errorf("deploy.grant.database_roles[%d]: privileges must not be empty", i)
-			}
+		if err := validateGrantConfig(s.Deploy.Grant); err != nil {
+			return fmt.Errorf("deploy.grant: %w", err)
 		}
 	}
 

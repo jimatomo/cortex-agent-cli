@@ -28,7 +28,8 @@ func LoadAgents(path string, recursive bool, envName string) ([]ParsedAgent, err
 5. **Strip vars node** — Remove vars from tree before KnownFields check
 6. **Substitute** — `substituteVars(&doc, resolved)` replaces `${ vars.KEY }` and `${ env.KEY }`
 7. **Re-encode and decode** — Encode node to bytes, decode with `KnownFields(true)` into `AgentSpec`
-8. **Validate** — `validateAgentSpec(spec)`
+8. **Resolve grant envs** — If `deploy.grant.envs` is present, resolve it to a flat `GrantConfig` using the selected `--env` and `default` fallback
+9. **Validate** — `validateAgentSpec(spec)`
 
 ## Variable Substitution
 
@@ -47,6 +48,8 @@ Enforced by `AgentSpec.Validate()` in `internal/agent/validate.go`:
 - `eval.tests[i].question` is required for each test case
 - `eval.response_score_threshold` must be between 0 and 100
 - `deploy.grant.account_roles[i]` / `database_roles[i]` — `role` required, `privileges` must not be empty
+- `deploy.grant.envs.<name>` — supports env-specific GRANT blocks with per-field fallback to `envs.default`
+- `deploy.grant` flat fields and `deploy.grant.envs` cannot be mixed in the same file
 
 ## Related Docs
 

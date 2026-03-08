@@ -20,7 +20,7 @@ flowchart LR
 
 - **Function:** `agent.LoadAgents(path, recursive, envName)`
 - **Source:** `internal/agent/loader.go`
-- **Behavior:** Reads YAML files (single file or directory), parses vars, substitutes `${ vars.* }` and `${ env.* }`, validates spec
+- **Behavior:** Reads YAML files (single file or directory), parses vars, substitutes `${ vars.* }` and `${ env.* }`, resolves `deploy.grant.envs` into a flat grant config, validates spec
 - **Output:** `[]agent.ParsedAgent` (path + spec per file)
 
 ### 2. Resolve Target
