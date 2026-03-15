@@ -20,17 +20,51 @@ import (
 
 type feedbackClient interface {
 	FeedbackTableExists(ctx context.Context, db, schema, table string) (bool, error)
+	FeedbackInferenceColumnsExist(ctx context.Context, db, schema, table string) (bool, error)
+	RenameFeedbackTable(ctx context.Context, db, schema, fromTable, toTable string) error
 	ClearFeedbackForAgent(ctx context.Context, db, schema, table, agentName string) error
 	GetLatestFeedbackEventTs(ctx context.Context, db, schema, table, agentName string) (string, error)
-	SyncFeedbackFromEventsToTable(ctx context.Context, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable, since string) error
+	SyncFeedbackFromEventsToTable(ctx context.Context, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable string, opts api.FeedbackQueryOptions) error
 	GetFeedbackFromTable(ctx context.Context, db, schema, table, agentName string) ([]api.FeedbackTableRow, error)
-	GetFeedback(ctx context.Context, db, schema, agentName, since string) ([]api.FeedbackRecord, error)
+	GetFeedback(ctx context.Context, db, schema, agentName string, opts api.FeedbackQueryOptions) ([]api.FeedbackRecord, error)
 	UpdateFeedbackChecked(ctx context.Context, db, schema, table, recordID string, checked bool) error
 	CreateFeedbackTable(ctx context.Context, db, schema, table string) error
 }
 
 var buildFeedbackClientAndCfg = func(opts *RootOptions) (feedbackClient, auth.Config, error) {
 	return buildClientAndCfg(opts)
+}
+
+var promptWithDefaultFn = promptWithDefault
+var feedbackInitNow = func() time.Time { return time.Now().UTC() }
+
+const defaultFeedbackJudgeModel = "llama4-scout"
+
+func resolveFeedbackJudgeModel(appCfg config.CoragentConfig) string {
+	if strings.TrimSpace(appCfg.Feedback.JudgeModel) != "" {
+		return appCfg.Feedback.JudgeModel
+	}
+	return defaultFeedbackJudgeModel
+}
+
+func feedbackQueryOptions(since string, inferNegative bool, judgeModel string) api.FeedbackQueryOptions {
+	opts := api.FeedbackQueryOptions{
+		Since:         since,
+		InferNegative: inferNegative,
+		JudgeModel:    judgeModel,
+	}
+	if inferNegative {
+		opts.ExplicitSince = ""
+		opts.RequestSince = since
+	}
+	return opts
+}
+
+func feedbackProgressf(cmd *cobra.Command, enabled bool, format string, args ...any) {
+	if !enabled {
+		return
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), format+"\n", args...)
 }
 
 func newFeedbackCmd(opts *RootOptions) *cobra.Command {
@@ -43,6 +77,7 @@ func newFeedbackCmd(opts *RootOptions) *cobra.Command {
 	var noRefresh bool
 	var clearCache bool
 	var initTable bool
+	var inferNegative bool
 
 	cmd := &cobra.Command{
 		Use:   "feedback [agent-name]",
@@ -73,6 +108,9 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
   # JSON output
   coragent feedback my-agent --json | jq .
 
+  # Infer negative interactions without explicit feedback
+  coragent feedback my-agent --infer-negative
+
   # Ensure remote feedback table exists (when feedback.remote.enabled in config)
   coragent feedback --init`,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -87,6 +125,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appCfg := config.LoadCoragentConfig()
+			feedbackJudgeModel := resolveFeedbackJudgeModel(appCfg)
 			remoteDb, remoteSchema, remoteTable := resolveFeedbackRemote(appCfg)
 			useRemote := appCfg.Feedback.Remote.Enabled && remoteDb != "" && remoteSchema != "" && remoteTable != ""
 
@@ -144,7 +183,9 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 			var remoteClient feedbackClient
 			var toShow []feedbackcache.Record
 			var localCache *feedbackcache.Cache
+			progressEnabled := !jsonOut
 			if useRemote {
+				feedbackProgressf(cmd, progressEnabled, "Loading remote feedback state...")
 				client, cfg, err := buildFeedbackClientAndCfg(opts)
 				if err != nil {
 					return err
@@ -166,16 +207,34 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 					if err != nil {
 						return err
 					}
+					if inferNegative {
+						ready, err := client.FeedbackInferenceColumnsExist(ctx, remoteDb, remoteSchema, remoteTable)
+						if err != nil {
+							return fmt.Errorf("check infer-negative columns: %w", err)
+						}
+						if !ready {
+							return UserErr(fmt.Errorf(
+								"remote feedback table %s.%s.%s is missing infer-negative columns; run `coragent feedback --init` to recreate it",
+								remoteDb, remoteSchema, remoteTable,
+							))
+						}
+					}
 					// 1. Get latest event_ts from remote table for diff sync.
 					since, err := client.GetLatestFeedbackEventTs(ctx, remoteDb, remoteSchema, remoteTable, agentName)
 					if err != nil {
 						return fmt.Errorf("get latest feedback timestamp: %w", err)
 					}
-					if err := client.SyncFeedbackFromEventsToTable(ctx, target.Database, target.Schema, agentName, remoteDb, remoteSchema, remoteTable, since); err != nil {
+					if since == "" {
+						feedbackProgressf(cmd, progressEnabled, "Syncing feedback from observability events into %s.%s.%s...", remoteDb, remoteSchema, remoteTable)
+					} else {
+						feedbackProgressf(cmd, progressEnabled, "Syncing feedback updates since %s into %s.%s.%s...", since, remoteDb, remoteSchema, remoteTable)
+					}
+					if err := client.SyncFeedbackFromEventsToTable(ctx, target.Database, target.Schema, agentName, remoteDb, remoteSchema, remoteTable, feedbackQueryOptions(since, inferNegative, feedbackJudgeModel)); err != nil {
 						return fmt.Errorf("sync feedback to remote table: %w", err)
 					}
 				}
 				// 2. Load records with checked state from remote table.
+				feedbackProgressf(cmd, progressEnabled, "Loading feedback records from %s.%s.%s...", remoteDb, remoteSchema, remoteTable)
 				rows, err := client.GetFeedbackFromTable(ctx, remoteDb, remoteSchema, remoteTable, agentName)
 				if err != nil {
 					return fmt.Errorf("load feedback from remote table: %w", err)
@@ -183,6 +242,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 				toShow = mergeRemoteRows(rows, includeChecked, nil)
 			} else {
 				// 1. Load cache and determine since (latest timestamp) for diff fetch.
+				feedbackProgressf(cmd, progressEnabled, "Loading local feedback cache...")
 				cache, err := feedbackcache.Load(agentName)
 				if err != nil {
 					return fmt.Errorf("load feedback cache: %w", err)
@@ -199,11 +259,17 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 					}
 					since := localCache.LatestTimestamp()
 					// 2. Fetch only new records from Snowflake (since cache latest).
-					fresh, err := client.GetFeedback(ctx, target.Database, target.Schema, agentName, since)
+					if since == "" {
+						feedbackProgressf(cmd, progressEnabled, "Fetching feedback from observability events...")
+					} else {
+						feedbackProgressf(cmd, progressEnabled, "Fetching feedback updates since %s...", since)
+					}
+					fresh, err := client.GetFeedback(ctx, target.Database, target.Schema, agentName, feedbackQueryOptions(since, inferNegative, feedbackJudgeModel))
 					if err != nil {
 						return err
 					}
 					localCache.Merge(fresh)
+					feedbackProgressf(cmd, progressEnabled, "Saving refreshed feedback cache...")
 					if err := feedbackcache.Save(agentName, localCache); err != nil {
 						return fmt.Errorf("save feedback cache: %w", err)
 					}
@@ -219,6 +285,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 					}
 				}
 			}
+			feedbackProgressf(cmd, progressEnabled, "Preparing feedback records for display...")
 
 			// Apply sentiment filter (--all) and --limit.
 			if !showAll {
@@ -252,7 +319,11 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 			fmt.Fprintf(cmd.OutOrStdout(), "Feedback for agent %q (%s):\n\n", agentName, filter)
 
 			if len(toShow) == 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "No feedback found for agent %q.\n", agentName)
+				if inferNegative {
+					fmt.Fprintf(cmd.OutOrStdout(), "No feedback or inferred negative interactions found for agent %q.\n", agentName)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "No feedback found for agent %q.\n", agentName)
+				}
 				return nil
 			}
 
@@ -330,6 +401,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Read only existing saved feedback state; skip API fetch or remote sync")
 	cmd.Flags().BoolVar(&clearCache, "clear", false, "Clear feedback state for the agent and exit (local cache or remote table)")
 	cmd.Flags().BoolVar(&initTable, "init", false, "Ensure the remote feedback table exists (create if missing); requires feedback.remote in config")
+	cmd.Flags().BoolVar(&inferNegative, "infer-negative", false, "Infer negative interactions from request/response pairs when explicit feedback is absent")
 
 	return cmd
 }
@@ -357,23 +429,46 @@ func runFeedbackInit(cmd *cobra.Command, opts *RootOptions, appCfg config.Corage
 		return fmt.Errorf("check feedback table: %w", err)
 	}
 	if exists {
-		fmt.Fprintf(
-			cmd.OutOrStdout(),
-			"Feedback table %s.%s.%s already exists. Recreate with CREATE OR REPLACE TABLE? This will drop existing rows. [y/N] ",
-			db, schema, table,
+		fqTable := fmt.Sprintf("%s.%s.%s", db, schema, table)
+		fmt.Fprintf(cmd.OutOrStdout(), "Feedback table %s already exists.\n", fqTable)
+
+		renameExisting, err := promptYesNo(
+			fmt.Sprintf(
+				"Rename the existing table before re-creating it? This keeps the current rows under a backup table name. [Y/n]",
+			),
+			true,
 		)
-		scanner := bufio.NewScanner(os.Stdin)
-		confirmed := false
-		if scanner.Scan() {
-			answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-			confirmed = answer == "y" || answer == "yes"
+		if err != nil {
+			return err
 		}
-		if err := scanner.Err(); err != nil {
-			return fmt.Errorf("read confirmation: %w", err)
-		}
-		if !confirmed {
-			fmt.Fprintln(cmd.OutOrStdout(), "Skipped re-creating feedback table.")
-			return nil
+		if renameExisting {
+			backupTable, err := promptWithDefaultFn("Backup table name", defaultFeedbackBackupTableName(table, feedbackInitNow()))
+			if err != nil {
+				return err
+			}
+			if strings.EqualFold(strings.Trim(backupTable, `"`), strings.Trim(table, `"`)) {
+				return UserErr(fmt.Errorf("backup table name must differ from the current feedback table name"))
+			}
+			if err := client.RenameFeedbackTable(ctx, db, schema, table, backupTable); err != nil {
+				return fmt.Errorf("rename feedback table: %w", err)
+			}
+			fmt.Fprintf(
+				cmd.OutOrStdout(),
+				"Renamed existing feedback table %s to %s.%s.%s.\n",
+				fqTable, db, schema, backupTable,
+			)
+		} else {
+			confirmed, err := promptYesNo(
+				"Recreate with CREATE OR REPLACE TABLE? This will drop existing rows. [y/N]",
+				false,
+			)
+			if err != nil {
+				return err
+			}
+			if !confirmed {
+				fmt.Fprintln(cmd.OutOrStdout(), "Skipped re-creating feedback table.")
+				return nil
+			}
 		}
 	}
 	if err := client.CreateFeedbackTable(ctx, db, schema, table); err != nil {
@@ -385,6 +480,32 @@ func runFeedbackInit(cmd *cobra.Command, opts *RootOptions, appCfg config.Corage
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Created feedback table %s.%s.%s.\n", db, schema, table)
 	return nil
+}
+
+func promptYesNo(label string, defaultYes bool) (bool, error) {
+	defaultValue := "N"
+	if defaultYes {
+		defaultValue = "Y"
+	}
+	answer, err := promptWithDefaultFn(label, defaultValue)
+	if err != nil {
+		return false, err
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	return answer == "y" || answer == "yes", nil
+}
+
+func defaultFeedbackBackupTableName(table string, now time.Time) string {
+	base := strings.TrimSpace(strings.Trim(table, `"`))
+	if base == "" {
+		base = "AGENT_FEEDBACK"
+	}
+	suffix := "_bak_" + now.UTC().Format("20060102_150405")
+	const maxIdentifierLen = 255
+	if len(base)+len(suffix) > maxIdentifierLen {
+		base = base[:maxIdentifierLen-len(suffix)]
+	}
+	return base + suffix
 }
 
 func mergeRemoteRows(rows []api.FeedbackTableRow, includeChecked bool, toolByRecord map[string][]api.ToolUseInfo) []feedbackcache.Record {
@@ -443,6 +564,12 @@ func printOneRecord(cmd *cobra.Command, idx, total int, r feedbackcache.Record, 
 		color.New(color.FgGreen).Fprintf(cmd.OutOrStdout(), "      Sentiment: %s\n", r.Sentiment)
 	default:
 		fmt.Fprintf(cmd.OutOrStdout(), "      Sentiment: %s\n", r.Sentiment)
+	}
+	if r.SentimentSource == "inferred" || r.SentimentReason != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "      Source:    %s\n", r.SentimentSource)
+	}
+	if r.SentimentReason != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "      Reason:    %s\n", indentMultiline(r.SentimentReason, "                 "))
 	}
 
 	if r.FeedbackMessage != "" {

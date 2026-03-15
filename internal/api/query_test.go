@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -74,6 +75,33 @@ func TestParseSnowflakeTimestamp(t *testing.T) {
 				t.Errorf("parseSnowflakeTimestamp(%q) = %q, want empty passthrough", tt.raw, got)
 			}
 		})
+	}
+}
+
+func TestSinceForSQL(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"utc suffix", "2026-03-08 00:00:00.000 UTC", "2026-03-08 00:00:00.000 +0000"},
+		{"already offset", "2026-03-08 00:00:00.000 +0900", "2026-03-08 00:00:00.000 +0900"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sinceForSQL(tt.input); got != tt.want {
+				t.Fatalf("sinceForSQL(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeFeedbackEventTimestamp(t *testing.T) {
+	got := normalizeFeedbackEventTimestamp("2026-03-08 00:00:00.000 UTC")
+	want := "2026-03-08 00:00:00.000 +0000"
+	if got != want {
+		t.Fatalf("normalizeFeedbackEventTimestamp() = %q, want %q", got, want)
 	}
 }
 
@@ -359,6 +387,161 @@ func TestProbeString(t *testing.T) {
 		got := probeString(m, []string{"nonexistent"})
 		if got != "" {
 			t.Errorf("probeString() = %q, want empty", got)
+		}
+	})
+}
+
+func TestParseNegativeInferenceResponse(t *testing.T) {
+	t.Run("structured output wrapper", func(t *testing.T) {
+		raw := `{"structured_output":[{"raw_message":{"negative":true,"reasoning":"The answer did not address the user's request"},"type":"json"}]}`
+		got, err := parseNegativeInferenceResponse(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !got.Negative {
+			t.Fatal("Negative = false, want true")
+		}
+		if got.Reasoning == "" {
+			t.Fatal("Reasoning should not be empty")
+		}
+	})
+
+	t.Run("direct schema object", func(t *testing.T) {
+		raw := `{"negative":true,"reasoning":"The answer did not address the user's request"}`
+		got, err := parseNegativeInferenceResponse(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !got.Negative {
+			t.Fatal("Negative = false, want true")
+		}
+		if got.Reasoning == "" {
+			t.Fatal("Reasoning should not be empty")
+		}
+	})
+}
+
+func TestSQLCellString(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   any
+		want    string
+		wantErr string
+	}{
+		{
+			name:  "string",
+			input: `{"structured_output":[{"raw_message":{"negative":true}}]}`,
+			want:  `{"structured_output":[{"raw_message":{"negative":true}}]}`,
+		},
+		{
+			name:  "variant object marshaled",
+			input: map[string]any{"structured_output": []any{map[string]any{"raw_message": map[string]any{"negative": true, "reasoning": "x"}}}},
+			want:  `{"structured_output":[{"raw_message":{"negative":true,"reasoning":"x"}}]}`,
+		},
+		{
+			name:    "null",
+			input:   nil,
+			wantErr: "null response",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := sqlCellString(tt.input)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("sqlCellString() error = nil, want %q", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("sqlCellString() error = %q, want substring %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("sqlCellString() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("sqlCellString() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInferNegativeFeedbackHeuristically(t *testing.T) {
+	tests := []struct {
+		name   string
+		record FeedbackRecord
+		wantOK bool
+		wantNg bool
+	}{
+		{
+			name: "empty response is negative",
+			record: FeedbackRecord{
+				Question: "show me the sales trend",
+				Response: "",
+			},
+			wantOK: true,
+			wantNg: true,
+		},
+		{
+			name: "missing requested year data is negative",
+			record: FeedbackRecord{
+				Question: "2026年の支出の傾向を教えてください",
+				Response: "申し訳ございませんが、データベースには2026年の支出データが存在しません。利用可能なデータは2024年のみです。代わりに2024年の分析は可能です。",
+			},
+			wantOK: true,
+			wantNg: true,
+		},
+		{
+			name: "substantive answer is not short-circuited",
+			record: FeedbackRecord{
+				Question: "show me the sales trend",
+				Response: "Sales increased 12% quarter over quarter, led by enterprise accounts.",
+			},
+			wantOK: false,
+			wantNg: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := inferNegativeFeedbackHeuristically(tt.record)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if ok && got.Negative != tt.wantNg {
+				t.Fatalf("Negative = %v, want %v", got.Negative, tt.wantNg)
+			}
+			if ok && strings.TrimSpace(got.Reasoning) == "" {
+				t.Fatal("Reasoning should not be empty when heuristic applies")
+			}
+		})
+	}
+}
+
+func TestMergeFeedbackRecords(t *testing.T) {
+	explicit := []FeedbackRecord{
+		{RecordID: "r1", Timestamp: "2026-03-08 10:00:00.000 UTC", FeedbackMessage: "explicit"},
+	}
+	inferred := []FeedbackRecord{
+		{RecordID: "r1", Timestamp: "2026-03-08 11:00:00.000 UTC", SentimentSource: "inferred"},
+		{RecordID: "r2", Timestamp: "2026-03-08 12:00:00.000 UTC", SentimentSource: "inferred"},
+	}
+
+	t.Run("infer disabled returns explicit only", func(t *testing.T) {
+		got := mergeFeedbackRecords(explicit, inferred, false)
+		if len(got) != 1 || got[0].RecordID != "r1" {
+			t.Fatalf("got = %+v, want only explicit r1", got)
+		}
+	})
+
+	t.Run("infer enabled appends non-duplicate inferred and sorts", func(t *testing.T) {
+		got := mergeFeedbackRecords(explicit, inferred, true)
+		if len(got) != 2 {
+			t.Fatalf("len(got) = %d, want 2", len(got))
+		}
+		if got[0].RecordID != "r2" || got[1].RecordID != "r1" {
+			t.Fatalf("unexpected order/contents: %+v", got)
 		}
 	})
 }

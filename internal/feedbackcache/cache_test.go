@@ -60,6 +60,36 @@ func TestMerge_CheckedStatePreserved(t *testing.T) {
 	}
 }
 
+func TestMerge_UpdatesExistingRecordData(t *testing.T) {
+	c := &feedbackcache.Cache{}
+	c.Merge([]api.FeedbackRecord{{
+		RecordID:        "r1",
+		Sentiment:       "negative",
+		SentimentSource: "inferred",
+		SentimentReason: "goal not achieved",
+	}})
+	c.Records[0].Checked = true
+
+	c.Merge([]api.FeedbackRecord{{
+		RecordID:        "r1",
+		Sentiment:       "negative",
+		FeedbackMessage: "explicit feedback",
+	}})
+
+	if len(c.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(c.Records))
+	}
+	if !c.Records[0].Checked {
+		t.Fatal("Checked state should be preserved when existing record is updated")
+	}
+	if c.Records[0].FeedbackMessage != "explicit feedback" {
+		t.Fatalf("FeedbackMessage = %q, want explicit feedback", c.Records[0].FeedbackMessage)
+	}
+	if c.Records[0].SentimentSource != "" {
+		t.Fatalf("SentimentSource = %q, want empty after explicit overwrite", c.Records[0].SentimentSource)
+	}
+}
+
 func TestMerge_SyntheticRecordID(t *testing.T) {
 	c := &feedbackcache.Cache{}
 	rec := api.FeedbackRecord{
