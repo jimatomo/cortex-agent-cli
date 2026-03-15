@@ -433,9 +433,7 @@ func runFeedbackInit(cmd *cobra.Command, opts *RootOptions, appCfg config.Corage
 		fmt.Fprintf(cmd.OutOrStdout(), "Feedback table %s already exists.\n", fqTable)
 
 		renameExisting, err := promptYesNo(
-			fmt.Sprintf(
-				"Rename the existing table before re-creating it? This keeps the current rows under a backup table name. [Y/n]",
-			),
+			"Rename the existing table before re-creating it? This keeps the current rows under a backup table name. [Y/n]",
 			true,
 		)
 		if err != nil {
