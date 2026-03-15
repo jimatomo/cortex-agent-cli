@@ -102,21 +102,22 @@ func (c *Cache) LatestTimestamp() string {
 // RecordID is used as the unique key. When it is empty a synthetic key
 // (timestamp + "|" + user) is written into RecordID before storing.
 func (c *Cache) Merge(records []api.FeedbackRecord) {
-	existing := make(map[string]struct{}, len(c.Records))
-	for _, r := range c.Records {
-		existing[r.RecordID] = struct{}{}
+	existing := make(map[string]int, len(c.Records))
+	for i, r := range c.Records {
+		existing[r.RecordID] = i
 	}
 	for _, r := range records {
 		if r.RecordID == "" {
 			r.RecordID = r.Timestamp + "|" + r.UserName
 		}
-		if _, found := existing[r.RecordID]; found {
+		if idx, found := existing[r.RecordID]; found {
+			c.Records[idx].FeedbackRecord = r
 			continue
 		}
 		c.Records = append(c.Records, Record{
 			Checked:        false,
 			FeedbackRecord: r,
 		})
-		existing[r.RecordID] = struct{}{}
+		existing[r.RecordID] = len(c.Records) - 1
 	}
 }

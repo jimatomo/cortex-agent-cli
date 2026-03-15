@@ -13,7 +13,7 @@ CLI tool for managing Snowflake Cortex Agent deployments via the REST API.
 - Export existing agents to YAML
 - Run agents with streaming response and multi-turn conversation support
 - Evaluate agent accuracy with test cases defined in YAML
-- LLM-as-a-Judge response scoring via Snowflake CORTEX.COMPLETE
+- LLM-as-a-Judge response scoring via Snowflake CORTEX.AI_COMPLETE
 - View user feedback from observability data (negative/all, JSON output, tool invocation details with SQL)
 - Variable substitution (`vars` and `env`) for environment-specific configuration
 - Recursive directory scanning for multi-agent projects
@@ -430,6 +430,9 @@ judge_model = "llama4-scout"       # LLM model for response scoring (default: ll
 response_score_threshold = 70      # minimum score to pass (0 = no threshold)
 ignore_tools = ["another_utility"] # additional tools to exclude from eval (data_to_chart excluded by default)
 
+[feedback]
+judge_model = "llama4-scout"       # model for --infer-negative scoring (default: llama4-scout)
+
 [feedback.remote]
 enabled = true                     # persist feedback and checked state to a Snowflake table
 database = "MY_DB"                 # database for the feedback table
@@ -509,7 +512,7 @@ When `command` is specified, it is executed via `sh -c` with the working directo
 
 ### Response Scoring (LLM-as-a-Judge)
 
-When `expected_response` is specified, the CLI calls `SNOWFLAKE.CORTEX.COMPLETE` with structured output to score the actual response against the expected response on a 0-100 scale. The judge model uses structured output (`response_format`) to guarantee a `{"score": int, "reasoning": string}` JSON response.
+When `expected_response` is specified, the CLI calls `SNOWFLAKE.CORTEX.AI_COMPLETE` with a single-string prompt plus structured output to score the actual response against the expected response on a 0-100 scale. The judge model uses structured output (`response_format`) to guarantee a `{"score": int, "reasoning": string}` JSON response.
 
 **Judge model resolution order** (highest priority first):
 
@@ -577,7 +580,32 @@ Events with `RECORD:name = 'CORTEX_AGENT_FEEDBACK'` are fetched and displayed, o
 
 Records are shown **one at a time** and after each one you are prompted to mark it as **checked**; checked records are hidden on subsequent runs. Progress is saved after each confirmation (locally or in the remote table, depending on config).
 
-By default, only negative feedback is shown. Use `--all` to show all feedback.
+By default, only negative feedback is shown. Use `--all` to show all feedback. Use `--no-refresh` to review only the already-saved state without fetching new observability events or syncing the remote feedback table.
+
+If you pass `--infer-negative`, the command also reviews `CORTEX_AGENT_REQUEST` interactions that do not have explicit feedback yet and uses `SNOWFLAKE.CORTEX.AI_COMPLETE` to infer whether the user's goal was substantially unmet. Only interactions inferred as negative are added to the result set. This mode is opt-in; without the flag, the original explicit-feedback-only behavior is preserved.
+
+### How `--infer-negative` Works
+
+When `--infer-negative` is enabled, the command performs the following additional steps:
+
+1. It still loads normal explicit feedback records first. Existing explicit feedback behavior does not change.
+2. It also scans `CORTEX_AGENT_REQUEST` interactions that do **not** have a matching `CORTEX_AGENT_FEEDBACK` event yet.
+3. For each request-only interaction, it extracts:
+   - the user question
+   - the agent text response
+   - a compact tool summary from any tool calls
+4. It sends those fields to `SNOWFLAKE.CORTEX.AI_COMPLETE` with a structured-output prompt that asks whether the interaction should be treated as implicit negative feedback.
+5. Only rows judged as clearly unmet or materially unhelpful are added to the result set with:
+   - `sentiment = negative`
+   - `sentiment_source = inferred`
+   - `sentiment_reason = ...`
+6. If an explicit feedback event later appears for the same `record_id`, that explicit record replaces the older inferred record while keeping the checked state.
+
+Notes:
+
+- `--infer-negative` is evaluated only during refresh. If you also pass `--no-refresh`, the command reads only the already saved local cache or remote table rows and does not run new inference.
+- In inference mode, the command re-evaluates the full candidate set instead of using incremental `since` fetches, so that request-only interactions can be reconsidered consistently.
+- In JSON and text output, inferred rows are marked with their source and reasoning so they can be distinguished from explicit user feedback.
 
 ```bash
 # Show negative (unchecked) feedback
@@ -592,6 +620,9 @@ coragent feedback my-agent -y
 # Also show already-checked records (displayed with [✓])
 coragent feedback my-agent --include-checked
 
+# Read only the existing saved state (skip API fetch or remote sync)
+coragent feedback my-agent --no-refresh
+
 # Limit results
 coragent feedback my-agent --limit 20
 
@@ -600,6 +631,9 @@ coragent feedback my-agent --no-tools
 
 # JSON output (no check prompt)
 coragent feedback my-agent --json | jq .
+
+# Infer negative interactions even when explicit feedback is absent
+coragent feedback my-agent --infer-negative
 
 # Ensure remote feedback table exists (when feedback.remote.enabled); create if missing
 coragent feedback --init
@@ -615,12 +649,14 @@ coragent feedback --init
 | `-y`, `--yes` | Auto-confirm marking each record as checked |
 | `--include-checked` | Also show already-checked records (marked with `[✓]`) |
 | `--no-tools` | Hide tool invocation details (Tools, Query, SQL) |
+| `--no-refresh` | Read only existing saved feedback state; skip API fetch in local mode or remote table sync in remote mode |
+| `--infer-negative` | Infer negative interactions from request/response pairs when explicit feedback is absent |
 | `--init` | Ensure the remote feedback table exists (create if missing); requires `[feedback.remote]` in config |
 | `--clear` | Clear feedback state for the agent and exit (local cache in local mode, remote rows in remote mode) |
 
 ### Remote feedback table
 
-When `[feedback.remote]` is enabled in `.coragent.toml` or `~/.coragent/config.toml`, run `coragent feedback --init` once to create the table if it does not exist. The table stores raw feedback payload (`raw_value`) and raw request payload (`request_raw`), flattened columns (sentiment, comment, question, response, tool_uses, etc.), and a `checked` flag with `checked_at` timestamp. If the table already exists, `feedback --init` prompts for confirmation before running `CREATE OR REPLACE TABLE` (which recreates the table and drops existing rows). The role must have `CREATE TABLE` (for `--init`) and `INSERT`/`UPDATE`/`SELECT`/`DELETE` on the target database and schema.
+When `[feedback.remote]` is enabled in `.coragent.toml` or `~/.coragent/config.toml`, run `coragent feedback --init` once to create the table if it does not exist. The table stores flattened feedback fields (sentiment, sentiment source/reason, feedback_message, categories, question, response, `tool_uses`, `request_value`, etc.) plus a `checked` flag with `checked_at` timestamp. If the table already exists, `feedback --init` prompts for confirmation before running `CREATE OR REPLACE TABLE` (which recreates the table and drops existing rows). Use `coragent feedback --no-refresh` to read the existing rows without syncing in new observability events first. The role must have `CREATE TABLE` (for `--init`) and `INSERT`/`UPDATE`/`SELECT`/`DELETE` on the target database and schema.
 
 ### Requirements
 
