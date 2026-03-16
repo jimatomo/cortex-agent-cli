@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -95,6 +96,12 @@ func sinceForSQL(since string) string {
 	return since
 }
 
+// normalizeFeedbackEventTimestamp prepares feedback timestamps for Snowflake
+// staging/upsert by converting the CLI's normalized UTC suffix into an offset.
+func normalizeFeedbackEventTimestamp(ts string) string {
+	return sinceForSQL(ts)
+}
+
 // FeedbackRecord holds a single CORTEX_AGENT_FEEDBACK observability event.
 type FeedbackRecord struct {
 	RecordID        string        `json:"record_id"` // RECORD_ATTRIBUTES['ai.observability.record_id']
@@ -102,6 +109,8 @@ type FeedbackRecord struct {
 	AgentName       string        `json:"agent_name"`
 	UserName        string        `json:"user_name"`
 	Sentiment       string        `json:"sentiment"` // "positive", "negative", "unknown"
+	SentimentSource string        `json:"sentiment_source,omitempty"`
+	SentimentReason string        `json:"sentiment_reason,omitempty"`
 	FeedbackMessage string        `json:"feedback_message"`
 	Categories      []string      `json:"categories,omitempty"`
 	Question        string        `json:"question,omitempty"`         // user's question from the associated REQUEST event
@@ -111,6 +120,25 @@ type FeedbackRecord struct {
 	RawRecord       string        `json:"raw_record"`                 // VALUE column raw JSON (fallback display)
 	RequestRaw      string        `json:"request_raw,omitempty"`      // CORTEX_AGENT_REQUEST VALUE raw JSON
 }
+
+// FeedbackQueryOptions controls optional behavior for feedback retrieval/sync.
+type FeedbackQueryOptions struct {
+	Since         string
+	ExplicitSince string
+	RequestSince  string
+	InferNegative bool
+	JudgeModel    string
+}
+
+type negativeInferenceResult struct {
+	Negative  bool   `json:"negative"`
+	Reasoning string `json:"reasoning"`
+}
+
+const (
+	sentimentSourceInferredHeuristic = "inferred_heuristic"
+	sentimentSourceInferredLLMJudge  = "inferred_llm_judge"
+)
 
 // ToolUseInfo captures a single tool invocation from the agent's response.
 type ToolUseInfo struct {
@@ -122,12 +150,60 @@ type ToolUseInfo struct {
 }
 
 // GetFeedback queries SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS for
-// CORTEX_AGENT_FEEDBACK events and returns them ordered by timestamp descending.
-// It LEFT JOINs the REQUEST events on ai.observability.record_id to include the
-// user's question and the agent's response alongside each feedback record.
-// If since is non-empty (UTC timestamp string, e.g. "2006-01-02 15:04:05.000 UTC"),
-// only events with f.TIMESTAMP >= since are returned.
-func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName, since string) ([]FeedbackRecord, error) {
+// CORTEX_AGENT_FEEDBACK events and optionally infers negative sentiment for
+// request-only interactions when opts.InferNegative is enabled.
+func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName string, opts FeedbackQueryOptions) ([]FeedbackRecord, error) {
+	explicit, err := c.getExplicitFeedback(ctx, db, schema, agentName, opts.ExplicitSince)
+	if err != nil {
+		return nil, err
+	}
+	if !opts.InferNegative {
+		return explicit, nil
+	}
+
+	requestSince := opts.RequestSince
+	if requestSince == "" {
+		requestSince = opts.Since
+	}
+	candidates, err := c.getRequestOnlyFeedbackCandidates(ctx, db, schema, agentName, requestSince)
+	if err != nil {
+		return nil, err
+	}
+
+	var inferred []FeedbackRecord
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate.Question) == "" {
+			continue
+		}
+		if result, ok := inferNegativeFeedbackHeuristically(candidate); ok {
+			if result.Negative {
+				candidate.Sentiment = "negative"
+			} else {
+				candidate.Sentiment = "positive"
+			}
+			candidate.SentimentSource = sentimentSourceInferredHeuristic
+			candidate.SentimentReason = result.Reasoning
+			inferred = append(inferred, candidate)
+			continue
+		}
+		result, err := c.inferNegativeFeedback(ctx, opts.JudgeModel, candidate)
+		if err != nil {
+			return nil, err
+		}
+		if result.Negative {
+			candidate.Sentiment = "negative"
+		} else {
+			candidate.Sentiment = "positive"
+		}
+		candidate.SentimentSource = sentimentSourceInferredLLMJudge
+		candidate.SentimentReason = result.Reasoning
+		inferred = append(inferred, candidate)
+	}
+
+	return mergeFeedbackRecords(explicit, inferred, true), nil
+}
+
+func (c *Client) getExplicitFeedback(ctx context.Context, db, schema, agentName, since string) ([]FeedbackRecord, error) {
 	dbEsc := escapeSQLString(unquoteIdentifier(db))
 	schemaEsc := escapeSQLString(unquoteIdentifier(schema))
 	agentEsc := escapeSQLString(agentName)
@@ -273,7 +349,141 @@ func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName, since s
 	return records, nil
 }
 
-// CortexComplete calls SNOWFLAKE.CORTEX.COMPLETE via the SQL API and returns the
+func (c *Client) getRequestOnlyFeedbackCandidates(ctx context.Context, db, schema, agentName, since string) ([]FeedbackRecord, error) {
+	dbEsc := escapeSQLString(unquoteIdentifier(db))
+	schemaEsc := escapeSQLString(unquoteIdentifier(schema))
+	agentEsc := escapeSQLString(agentName)
+	whereExtra := ""
+	if since != "" {
+		sinceEsc := escapeSQLString(sinceForSQL(since))
+		whereExtra = fmt.Sprintf(" AND r.TIMESTAMP >= TO_TIMESTAMP_TZ('%s', 'YYYY-MM-DD HH24:MI:SS.FF3 TZHTZM')", sinceEsc)
+	}
+
+	stmt := fmt.Sprintf(
+		"SELECT"+
+			" r.TIMESTAMP,"+
+			" r.RESOURCE_ATTRIBUTES,"+
+			" r.RECORD_ATTRIBUTES AS REQUEST_ATTRS,"+
+			" r.VALUE             AS REQUEST_VALUE,"+
+			" r.RECORD_ATTRIBUTES['ai.observability.record_id'] AS RECORD_ID"+
+			" FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS('%s', '%s', '%s', 'CORTEX AGENT')) r"+
+			" LEFT JOIN TABLE(SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS('%s', '%s', '%s', 'CORTEX AGENT')) f"+
+			"   ON  r.RECORD_ATTRIBUTES['ai.observability.record_id']"+
+			"     = f.RECORD_ATTRIBUTES['ai.observability.record_id']"+
+			"   AND f.RECORD:name = 'CORTEX_AGENT_FEEDBACK'"+
+			" WHERE r.RECORD:name = 'CORTEX_AGENT_REQUEST'"+
+			"   AND f.RECORD:name IS NULL"+
+			"%s"+
+			" ORDER BY r.TIMESTAMP DESC",
+		dbEsc, schemaEsc, agentEsc,
+		dbEsc, schemaEsc, agentEsc,
+		whereExtra,
+	)
+
+	payload := sqlStatementRequest{
+		Statement: stmt,
+		Database:  unquoteIdentifier(db),
+		Schema:    unquoteIdentifier(schema),
+	}
+	if strings.TrimSpace(c.authCfg.Warehouse) != "" {
+		payload.Warehouse = c.authCfg.Warehouse
+	}
+	if strings.TrimSpace(c.role) != "" {
+		payload.Role = c.role
+	}
+
+	var resp sqlStatementResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.sqlURL(), payload, &resp); err != nil {
+		return nil, err
+	}
+
+	colIndex := make(map[string]int)
+	for i, col := range resp.ResultSetMetaData.RowType {
+		colIndex[strings.ToLower(col.Name)] = i
+	}
+
+	var records []FeedbackRecord
+	for _, row := range resp.Data {
+		rec := FeedbackRecord{
+			AgentName:       agentName,
+			Sentiment:       "unknown",
+			SentimentSource: "inferred",
+		}
+
+		if idx, ok := colIndex["timestamp"]; ok && idx < len(row) {
+			if raw, ok := row[idx].(string); ok {
+				rec.Timestamp = parseSnowflakeTimestamp(raw)
+			}
+		}
+		if idx, ok := colIndex["request_attrs"]; ok && idx < len(row) {
+			if attrJSON, ok := row[idx].(string); ok && attrJSON != "" {
+				var attrs map[string]any
+				if err := json.Unmarshal([]byte(attrJSON), &attrs); err == nil {
+					if name, ok := attrs["snow.ai.observability.object.name"].(string); ok && name != "" {
+						rec.AgentName = name
+					}
+					if user, ok := attrs["snow.ai.observability.user.name"].(string); ok && user != "" {
+						rec.UserName = user
+					}
+				}
+			}
+		}
+		if rec.UserName == "" {
+			if idx, ok := colIndex["resource_attributes"]; ok && idx < len(row) {
+				if attrJSON, ok := row[idx].(string); ok && attrJSON != "" {
+					var attrs map[string]any
+					if err := json.Unmarshal([]byte(attrJSON), &attrs); err == nil {
+						if user, ok := attrs["snow.user.name"].(string); ok && user != "" {
+							rec.UserName = user
+						}
+					}
+				}
+			}
+		}
+		if idx, ok := colIndex["request_value"]; ok && idx < len(row) {
+			if reqJSON, ok := row[idx].(string); ok && reqJSON != "" {
+				rec.RequestRaw = reqJSON
+				rec.Question = extractQuestion(reqJSON)
+				rec.Response = extractResponse(reqJSON)
+				rec.ToolUses = extractToolUses(reqJSON)
+				rec.ResponseTimeMs = extractResponseTimeMs(reqJSON)
+			}
+		}
+		if idx, ok := colIndex["record_id"]; ok && idx < len(row) {
+			if rid, ok := row[idx].(string); ok {
+				rec.RecordID = strings.Trim(rid, `"`)
+			}
+		}
+
+		records = append(records, rec)
+	}
+
+	return records, nil
+}
+
+func mergeFeedbackRecords(explicit, inferred []FeedbackRecord, includeInferred bool) []FeedbackRecord {
+	if !includeInferred {
+		return explicit
+	}
+	seen := make(map[string]struct{}, len(explicit))
+	merged := append([]FeedbackRecord{}, explicit...)
+	for _, rec := range explicit {
+		seen[rec.RecordID] = struct{}{}
+	}
+	for _, rec := range inferred {
+		if _, ok := seen[rec.RecordID]; ok {
+			continue
+		}
+		merged = append(merged, rec)
+		seen[rec.RecordID] = struct{}{}
+	}
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].Timestamp > merged[j].Timestamp
+	})
+	return merged
+}
+
+// CortexComplete calls SNOWFLAKE.CORTEX.AI_COMPLETE via the SQL API and returns the
 // raw text content from the model response. The caller provides the model name
 // and the full SQL statement (so structured-output options can be embedded).
 func (c *Client) CortexComplete(ctx context.Context, sqlStmt string) (string, error) {
@@ -296,12 +506,159 @@ func (c *Client) CortexComplete(ctx context.Context, sqlStmt string) (string, er
 		return "", fmt.Errorf("cortex complete: empty response")
 	}
 
-	raw, ok := resp.Data[0][0].(string)
-	if !ok {
-		return "", fmt.Errorf("cortex complete: unexpected response type")
+	raw, err := sqlCellString(resp.Data[0][0])
+	if err != nil {
+		return "", fmt.Errorf("cortex complete: %w", err)
 	}
 
 	return raw, nil
+}
+
+func sqlCellString(v any) (string, error) {
+	switch val := v.(type) {
+	case nil:
+		return "", fmt.Errorf("null response")
+	case string:
+		return val, nil
+	case []byte:
+		return string(val), nil
+	default:
+		encoded, err := json.Marshal(val)
+		if err != nil {
+			return "", fmt.Errorf("unexpected response type %T", v)
+		}
+		return string(encoded), nil
+	}
+}
+
+func (c *Client) inferNegativeFeedback(ctx context.Context, model string, record FeedbackRecord) (negativeInferenceResult, error) {
+	toolSummary := summarizeToolUses(record.ToolUses)
+	if strings.TrimSpace(model) == "" {
+		model = "llama4-scout"
+	}
+	prompt := fmt.Sprintf(
+		"You are classifying whether an agent interaction should be treated as implicit negative feedback.\n\n"+
+			"Question: %s\n\nAgent Response: %s\n\nTool Summary: %s\n\n"+
+			"Return negative=true only when the response clearly failed to achieve the user's goal, was materially unhelpful, refused without solving the need, or otherwise left the request substantially unmet. "+
+			"If the agent says the requested data is unavailable, missing, not recorded, or only offers an alternative timeframe/source instead of answering the original request, that is negative because the user's goal was unmet. "+
+			"Do not mark negative for minor wording issues or partially useful answers that still satisfy the request. Provide a brief reasoning.",
+		record.Question,
+		record.Response,
+		toolSummary,
+	)
+	escapedPrompt := strings.ReplaceAll(prompt, "'", "''")
+	stmt := fmt.Sprintf(`SELECT SNOWFLAKE.CORTEX.AI_COMPLETE(
+    model => '%s',
+    prompt => '%s',
+    model_parameters => {
+        'temperature': 0
+    },
+    response_format => {
+        'type': 'json',
+        'schema': {
+            'type': 'object',
+            'properties': {
+                'negative': {'type': 'boolean'},
+                'reasoning': {'type': 'string'}
+            },
+            'required': ['negative', 'reasoning']
+        }
+    },
+    show_details => TRUE
+) AS response;`, model, escapedPrompt)
+
+	raw, err := c.CortexComplete(ctx, stmt)
+	if err != nil {
+		return negativeInferenceResult{}, err
+	}
+	return parseNegativeInferenceResponse(raw)
+}
+
+func inferNegativeFeedbackHeuristically(record FeedbackRecord) (negativeInferenceResult, bool) {
+	response := strings.ToLower(strings.TrimSpace(record.Response))
+	if response == "" {
+		return negativeInferenceResult{
+			Negative:  true,
+			Reasoning: "The agent did not provide a substantive answer to the user's request.",
+		}, true
+	}
+
+	hardFailurePhrases := []string{
+		"i can't answer", "i cannot answer", "cannot provide", "can't provide",
+		"unable to provide", "not enough information", "insufficient information",
+		"回答できません", "お答えできません", "提供できません", "情報がありません",
+	}
+	for _, phrase := range hardFailurePhrases {
+		if strings.Contains(response, phrase) {
+			return negativeInferenceResult{
+				Negative:  true,
+				Reasoning: "The response explicitly says the agent could not answer the user's request.",
+			}, true
+		}
+	}
+
+	unavailableDataPhrases := []string{
+		"no data", "data does not exist", "data is unavailable",
+		"not recorded", "not in the database", "database does not contain",
+		"missing data",
+		"データが存在しません", "データは存在しません", "データがありません",
+		"データベースには", "記録されていない", "まだ記録されていない", "利用可能なデータは",
+	}
+	for _, phrase := range unavailableDataPhrases {
+		if strings.Contains(response, phrase) {
+			return negativeInferenceResult{
+				Negative:  true,
+				Reasoning: "The response says the requested data or information is unavailable, so the original request was not fulfilled.",
+			}, true
+		}
+	}
+
+	return negativeInferenceResult{}, false
+}
+
+func parseNegativeInferenceResponse(raw string) (negativeInferenceResult, error) {
+	var direct negativeInferenceResult
+	if err := json.Unmarshal([]byte(raw), &direct); err == nil {
+		if direct.Reasoning != "" || direct.Negative {
+			return direct, nil
+		}
+	}
+
+	var completeResp struct {
+		StructuredOutput []struct {
+			RawMessage negativeInferenceResult `json:"raw_message"`
+		} `json:"structured_output"`
+	}
+	if err := json.Unmarshal([]byte(raw), &completeResp); err != nil {
+		return negativeInferenceResult{}, fmt.Errorf("parse negative inference response: %w", err)
+	}
+	if len(completeResp.StructuredOutput) == 0 {
+		return negativeInferenceResult{}, fmt.Errorf("no structured_output in complete response")
+	}
+	return completeResp.StructuredOutput[0].RawMessage, nil
+}
+
+func summarizeToolUses(toolUses []ToolUseInfo) string {
+	if len(toolUses) == 0 {
+		return "(none)"
+	}
+	parts := make([]string, 0, len(toolUses))
+	for _, tu := range toolUses {
+		name := strings.TrimSpace(tu.ToolName)
+		typ := strings.TrimSpace(tu.ToolType)
+		switch {
+		case typ != "" && name != "":
+			parts = append(parts, typ+" ("+name+")")
+		case name != "":
+			parts = append(parts, name)
+		case typ != "":
+			parts = append(parts, typ)
+		}
+	}
+	if len(parts) == 0 {
+		return "(none)"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // extractQuestion extracts the last user message text from a CORTEX_AGENT_REQUEST VALUE JSON.
@@ -580,10 +937,42 @@ func (c *Client) FeedbackTableExists(ctx context.Context, db, schema, table stri
 	return false, nil
 }
 
+func (c *Client) feedbackTableColumnSet(ctx context.Context, db, schema, table string) (map[string]struct{}, error) {
+	fq := fmt.Sprintf("%s.%s.%s",
+		identifierSegment(db), identifierSegment(schema), identifierSegment(table))
+	stmt := fmt.Sprintf("SHOW COLUMNS IN TABLE %s", fq)
+	resp, err := c.executeStatement(ctx, db, schema, stmt)
+	if err != nil {
+		return nil, err
+	}
+	colIndex := make(map[string]int)
+	for i, col := range resp.ResultSetMetaData.RowType {
+		colIndex[strings.ToLower(col.Name)] = i
+	}
+	nameIdx, ok := colIndex["column_name"]
+	if !ok {
+		nameIdx, ok = colIndex["name"]
+	}
+	if !ok {
+		return map[string]struct{}{}, nil
+	}
+	colSet := make(map[string]struct{}, len(resp.Data))
+	for _, row := range resp.Data {
+		if nameIdx >= len(row) {
+			continue
+		}
+		if name, ok := row[nameIdx].(string); ok {
+			colSet[strings.ToLower(strings.Trim(name, `"`))] = struct{}{}
+		}
+	}
+	return colSet, nil
+}
+
 // CreateFeedbackTable creates or replaces the feedback persistence table.
-// Table columns: record_id, event_ts, agent_name, user_name, sentiment, feedback_message,
-// categories, question, response, response_time_ms, tool_uses, request_value,
-// checked, checked_at, created_at, updated_at.
+// Table columns: record_id, event_ts, agent_name, user_name, sentiment,
+// sentiment_source, sentiment_reason, feedback_message, categories, question,
+// response, response_time_ms, tool_uses, request_value, checked, checked_at,
+// created_at, updated_at.
 func (c *Client) CreateFeedbackTable(ctx context.Context, db, schema, table string) error {
 	fq := fmt.Sprintf("%s.%s.%s",
 		identifierSegment(db), identifierSegment(schema), identifierSegment(table))
@@ -593,6 +982,8 @@ func (c *Client) CreateFeedbackTable(ctx context.Context, db, schema, table stri
   agent_name VARCHAR,
   user_name VARCHAR,
   sentiment VARCHAR,
+  sentiment_source VARCHAR,
+  sentiment_reason VARCHAR,
   feedback_message VARCHAR,
   categories VARCHAR,
   question VARCHAR,
@@ -617,6 +1008,35 @@ func (c *Client) CreateFeedbackTable(ctx context.Context, db, schema, table stri
 		payload.Role = c.role
 	}
 	return c.doJSON(ctx, http.MethodPost, c.sqlURL(), payload, nil)
+}
+
+// RenameFeedbackTable renames an existing feedback table within the same schema.
+func (c *Client) RenameFeedbackTable(ctx context.Context, db, schema, fromTable, toTable string) error {
+	fq := fmt.Sprintf("%s.%s.%s",
+		identifierSegment(db), identifierSegment(schema), identifierSegment(fromTable))
+	stmt := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", fq, identifierSegment(toTable))
+	payload := sqlStatementRequest{
+		Statement: stmt,
+		Database:  unquoteIdentifier(db),
+		Schema:    unquoteIdentifier(schema),
+	}
+	if strings.TrimSpace(c.authCfg.Warehouse) != "" {
+		payload.Warehouse = c.authCfg.Warehouse
+	}
+	if strings.TrimSpace(c.role) != "" {
+		payload.Role = c.role
+	}
+	return c.doJSON(ctx, http.MethodPost, c.sqlURL(), payload, nil)
+}
+
+func (c *Client) FeedbackInferenceColumnsExist(ctx context.Context, db, schema, table string) (bool, error) {
+	colSet, err := c.feedbackTableColumnSet(ctx, db, schema, table)
+	if err != nil {
+		return false, err
+	}
+	_, hasSource := colSet["sentiment_source"]
+	_, hasReason := colSet["sentiment_reason"]
+	return hasSource && hasReason, nil
 }
 
 // executeStatement runs a single statement in the given database and schema.
@@ -668,8 +1088,8 @@ func (c *Client) executeStatement(ctx context.Context, db, schema, stmt string) 
 	return &resp, nil
 }
 
-// UpsertFeedbackRecords inserts feedback records into the remote table.
-// Rows with an existing record_id are skipped (no update of checked state).
+// UpsertFeedbackRecords inserts or updates feedback records in the remote table.
+// Existing rows keep their checked state while mutable feedback fields are refreshed.
 // It stages rows into a transient table and executes a single MERGE for better throughput.
 func (c *Client) UpsertFeedbackRecords(ctx context.Context, db, schema, table string, records []FeedbackRecord) error {
 	if len(records) == 0 {
@@ -692,6 +1112,8 @@ func (c *Client) UpsertFeedbackRecords(ctx context.Context, db, schema, table st
   agent_name VARCHAR,
   user_name VARCHAR,
   sentiment VARCHAR,
+  sentiment_source VARCHAR,
+  sentiment_reason VARCHAR,
   feedback_message VARCHAR,
   categories_raw VARCHAR,
   question VARCHAR,
@@ -723,9 +1145,21 @@ func (c *Client) UpsertFeedbackRecords(ctx context.Context, db, schema, table st
 			if rid == "" {
 				rid = r.Timestamp + "|" + r.UserName
 			}
+			sentimentSourceRaw := "NULL"
+			if strings.TrimSpace(r.SentimentSource) != "" {
+				sentimentSourceRaw = fmt.Sprintf("'%s'::VARCHAR", escapeSQLString(r.SentimentSource))
+			}
+			sentimentReasonRaw := "NULL"
+			if strings.TrimSpace(r.SentimentReason) != "" {
+				sentimentReasonRaw = fmt.Sprintf("'%s'::VARCHAR", escapeSQLString(r.SentimentReason))
+			}
+			feedbackMessageRaw := "NULL"
+			if strings.TrimSpace(r.FeedbackMessage) != "" {
+				feedbackMessageRaw = fmt.Sprintf("'%s'::VARCHAR", escapeSQLString(r.FeedbackMessage))
+			}
 			eventTsRaw := "NULL"
 			if r.Timestamp != "" {
-				eventTsRaw = fmt.Sprintf("'%s'::VARCHAR", escapeSQLString(r.Timestamp))
+				eventTsRaw = fmt.Sprintf("'%s'::VARCHAR", escapeSQLString(normalizeFeedbackEventTimestamp(r.Timestamp)))
 			}
 			categoriesRaw := "NULL"
 			if len(r.Categories) > 0 {
@@ -742,13 +1176,15 @@ func (c *Client) UpsertFeedbackRecords(ctx context.Context, db, schema, table st
 				requestValueRaw = fmt.Sprintf("'%s'::VARCHAR", escapeSQLJSONString(r.RequestRaw))
 			}
 			selects = append(selects, fmt.Sprintf(
-				`SELECT '%s'::VARCHAR AS record_id, %s AS event_ts_raw, '%s'::VARCHAR AS agent_name, '%s'::VARCHAR AS user_name, '%s'::VARCHAR AS sentiment, '%s'::VARCHAR AS feedback_message, %s AS categories_raw, '%s'::VARCHAR AS question, '%s'::VARCHAR AS response, %d::NUMBER AS response_time_ms, %s AS tool_uses_raw, %s AS request_value_raw`,
+				`SELECT '%s'::VARCHAR AS record_id, %s AS event_ts_raw, '%s'::VARCHAR AS agent_name, '%s'::VARCHAR AS user_name, '%s'::VARCHAR AS sentiment, %s AS sentiment_source, %s AS sentiment_reason, %s AS feedback_message, %s AS categories_raw, '%s'::VARCHAR AS question, '%s'::VARCHAR AS response, %d::NUMBER AS response_time_ms, %s AS tool_uses_raw, %s AS request_value_raw`,
 				escapeSQLString(rid),
 				eventTsRaw,
 				escapeSQLString(r.AgentName),
 				escapeSQLString(r.UserName),
 				escapeSQLString(r.Sentiment),
-				escapeSQLString(r.FeedbackMessage),
+				sentimentSourceRaw,
+				sentimentReasonRaw,
+				feedbackMessageRaw,
 				categoriesRaw,
 				escapeSQLString(r.Question),
 				escapeSQLString(r.Response),
@@ -759,7 +1195,7 @@ func (c *Client) UpsertFeedbackRecords(ctx context.Context, db, schema, table st
 		}
 
 		insertStmt := fmt.Sprintf(
-			`INSERT INTO %s (record_id, event_ts_raw, agent_name, user_name, sentiment, feedback_message, categories_raw, question, response, response_time_ms, tool_uses_raw, request_value_raw)
+			`INSERT INTO %s (record_id, event_ts_raw, agent_name, user_name, sentiment, sentiment_source, sentiment_reason, feedback_message, categories_raw, question, response, response_time_ms, tool_uses_raw, request_value_raw)
 %s`,
 			tmpFQ,
 			strings.Join(selects, "\nUNION ALL\n"),
@@ -773,11 +1209,17 @@ func (c *Client) UpsertFeedbackRecords(ctx context.Context, db, schema, table st
 		`MERGE INTO %s AS t USING (
   SELECT
     record_id,
-    COALESCE(TRY_TO_TIMESTAMP_TZ(event_ts_raw), TRY_TO_TIMESTAMP_NTZ(event_ts_raw)::TIMESTAMP_TZ) AS event_ts,
+    COALESCE(
+      TRY_TO_TIMESTAMP_TZ(event_ts_raw, 'YYYY-MM-DD HH24:MI:SS.FF3 TZHTZM'),
+      TRY_TO_TIMESTAMP_TZ(event_ts_raw),
+      TRY_TO_TIMESTAMP_NTZ(event_ts_raw)::TIMESTAMP_TZ
+    ) AS event_ts,
     agent_name,
     user_name,
     sentiment,
-    feedback_message,
+    sentiment_source,
+    sentiment_reason,
+    NULLIF(feedback_message, '') AS feedback_message,
     TRY_PARSE_JSON(categories_raw) AS categories,
     question,
     response,
@@ -786,8 +1228,31 @@ func (c *Client) UpsertFeedbackRecords(ctx context.Context, db, schema, table st
     TRY_PARSE_JSON(request_value_raw) AS request_value
   FROM %s
 ) AS s ON t.record_id = s.record_id
-WHEN NOT MATCHED THEN INSERT (record_id, event_ts, agent_name, user_name, sentiment, feedback_message, categories, question, response, response_time_ms, tool_uses, request_value)
-VALUES (s.record_id, s.event_ts, s.agent_name, s.user_name, s.sentiment, s.feedback_message, s.categories, s.question, s.response, s.response_time_ms, s.tool_uses, s.request_value)`,
+WHEN MATCHED THEN UPDATE SET
+  event_ts = s.event_ts,
+  agent_name = s.agent_name,
+  user_name = s.user_name,
+  sentiment = s.sentiment,
+  sentiment_source = s.sentiment_source,
+  sentiment_reason = s.sentiment_reason,
+  feedback_message = s.feedback_message,
+  categories = s.categories,
+  question = s.question,
+  response = s.response,
+  response_time_ms = s.response_time_ms,
+  tool_uses = s.tool_uses,
+  request_value = s.request_value,
+  checked = CASE
+    WHEN COALESCE(t.sentiment, '') <> 'negative' AND s.sentiment = 'negative' THEN FALSE
+    ELSE t.checked
+  END,
+  checked_at = CASE
+    WHEN COALESCE(t.sentiment, '') <> 'negative' AND s.sentiment = 'negative' THEN NULL
+    ELSE t.checked_at
+  END,
+  updated_at = CURRENT_TIMESTAMP()
+WHEN NOT MATCHED THEN INSERT (record_id, event_ts, agent_name, user_name, sentiment, sentiment_source, sentiment_reason, feedback_message, categories, question, response, response_time_ms, tool_uses, request_value)
+VALUES (s.record_id, s.event_ts, s.agent_name, s.user_name, s.sentiment, s.sentiment_source, s.sentiment_reason, s.feedback_message, s.categories, s.question, s.response, s.response_time_ms, s.tool_uses, s.request_value)`,
 		fq, tmpFQ,
 	)
 	if _, err := c.executeStatement(ctx, db, schema, mergeStmt); err != nil {
@@ -797,11 +1262,392 @@ VALUES (s.record_id, s.event_ts, s.agent_name, s.user_name, s.sentiment, s.feedb
 	return nil
 }
 
+func feedbackRecordsHaveStableRecordIDs(records []FeedbackRecord) bool {
+	for _, r := range records {
+		if strings.TrimSpace(r.RecordID) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Client) stageFeedbackSelectionRecords(ctx context.Context, db, schema, table string, records []FeedbackRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	fq := fmt.Sprintf("%s.%s.%s",
+		identifierSegment(db), identifierSegment(schema), identifierSegment(table))
+
+	const batchSize = 500
+	for start := 0; start < len(records); start += batchSize {
+		end := start + batchSize
+		if end > len(records) {
+			end = len(records)
+		}
+
+		var selects []string
+		for _, r := range records[start:end] {
+			sentiment := "NULL"
+			if strings.TrimSpace(r.Sentiment) != "" {
+				sentiment = fmt.Sprintf("'%s'::VARCHAR", escapeSQLString(r.Sentiment))
+			}
+			sentimentSource := "NULL"
+			if strings.TrimSpace(r.SentimentSource) != "" {
+				sentimentSource = fmt.Sprintf("'%s'::VARCHAR", escapeSQLString(r.SentimentSource))
+			}
+			sentimentReason := "NULL"
+			if strings.TrimSpace(r.SentimentReason) != "" {
+				sentimentReason = fmt.Sprintf("'%s'::VARCHAR", escapeSQLString(r.SentimentReason))
+			}
+			selects = append(selects, fmt.Sprintf(
+				`SELECT '%s'::VARCHAR AS record_id, %s AS sentiment, %s AS sentiment_source, %s AS sentiment_reason`,
+				escapeSQLString(r.RecordID),
+				sentiment,
+				sentimentSource,
+				sentimentReason,
+			))
+		}
+
+		insertStmt := fmt.Sprintf(
+			`INSERT INTO %s (record_id, sentiment, sentiment_source, sentiment_reason)
+%s`,
+			fq,
+			strings.Join(selects, "\nUNION ALL\n"),
+		)
+		if _, err := c.executeStatement(ctx, db, schema, insertStmt); err != nil {
+			return fmt.Errorf("stage feedback selection records (%d-%d): %w", start, end-1, err)
+		}
+	}
+
+	return nil
+}
+
+func (c *Client) syncInferNegativeFeedbackFromSource(ctx context.Context, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable string, records []FeedbackRecord) error {
+	if !feedbackRecordsHaveStableRecordIDs(records) {
+		if len(records) == 0 {
+			return nil
+		}
+		if err := c.UpsertFeedbackRecords(ctx, dstDB, dstSchema, dstTable, records); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	dstFQ := fmt.Sprintf("%s.%s.%s",
+		identifierSegment(dstDB), identifierSegment(dstSchema), identifierSegment(dstTable))
+	metaTable := fmt.Sprintf("TMP_FEEDBACK_SELECTION_%d", time.Now().UnixNano())
+	metaFQ := fmt.Sprintf("%s.%s.%s",
+		identifierSegment(dstDB), identifierSegment(dstSchema), identifierSegment(metaTable))
+
+	createMetaStmt := fmt.Sprintf(`CREATE TRANSIENT TABLE %s (
+  record_id VARCHAR,
+  sentiment VARCHAR,
+  sentiment_source VARCHAR,
+  sentiment_reason VARCHAR
+)`, metaFQ)
+	if _, err := c.executeStatement(ctx, dstDB, dstSchema, createMetaStmt); err != nil {
+		return fmt.Errorf("create temporary feedback selection table: %w", err)
+	}
+	defer func() {
+		dropStmt := fmt.Sprintf("DROP TABLE IF EXISTS %s", metaFQ)
+		_, _ = c.executeStatement(context.Background(), dstDB, dstSchema, dropStmt)
+	}()
+
+	if err := c.stageFeedbackSelectionRecords(ctx, dstDB, dstSchema, metaTable, records); err != nil {
+		return err
+	}
+
+	srcDBEsc := escapeSQLString(unquoteIdentifier(srcDB))
+	srcSchemaEsc := escapeSQLString(unquoteIdentifier(srcSchema))
+	agentEsc := escapeSQLString(agentName)
+
+	mergeStmt := fmt.Sprintf(
+		`MERGE INTO %s AS t USING (
+WITH selected_records AS (
+    SELECT
+      record_id,
+      sentiment,
+      sentiment_source,
+      sentiment_reason
+    FROM %s
+  ),
+
+  records_needing_normalization AS (
+    SELECT
+      record_id,
+      sentiment,
+      NULLIF(sentiment_source, '') AS sentiment_source,
+      NULLIF(sentiment_reason, '') AS sentiment_reason
+    FROM %s
+    WHERE agent_name = '%s'
+      AND (
+        sentiment_source = ''
+        OR sentiment_reason = ''
+        OR feedback_message = ''
+      )
+  ),
+
+  selected_record_set AS (
+    SELECT
+      record_id,
+      sentiment,
+      sentiment_source,
+      sentiment_reason
+    FROM selected_records
+    UNION ALL
+    SELECT
+      n.record_id,
+      n.sentiment,
+      n.sentiment_source,
+      n.sentiment_reason
+    FROM records_needing_normalization n
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM selected_records s
+      WHERE s.record_id = n.record_id
+    )
+  ),
+
+  all_events AS (
+    SELECT *
+    FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_EVENTS('%s', '%s', '%s', 'CORTEX AGENT'))
+  ),
+
+  transformed_events AS (
+    SELECT
+      RECORD_ATTRIBUTES['ai.observability.record_id']::STRING AS record_id,
+      RECORD:name::STRING AS event_name,
+      TIMESTAMP::TIMESTAMP_TZ AS event_ts,
+      RECORD_ATTRIBUTES['snow.ai.observability.object.name']::STRING AS agent_name,
+      COALESCE(
+        RECORD_ATTRIBUTES['snow.ai.observability.user.name']::STRING,
+        RESOURCE_ATTRIBUTES['snow.user.name']::STRING
+      ) AS user_name,
+      CASE WHEN TRY_TO_BOOLEAN(VALUE:positive::STRING) THEN 'positive' ELSE 'negative' END AS feedback_sentiment,
+      NULLIF(VALUE:feedback_message::STRING, '') AS feedback_message,
+      VALUE:categories AS categories,
+      TRY_TO_NUMBER(VALUE:"snow.ai.observability.response_time_ms"::STRING) AS response_time_ms,
+      TRY_PARSE_JSON(VALUE:"snow.ai.observability.response"::STRING) AS request_response_json,
+      VALUE AS request_value
+    FROM all_events
+    WHERE RECORD:name::STRING IN ('CORTEX_AGENT_FEEDBACK', 'CORTEX_AGENT_REQUEST')
+  ),
+
+  explicit_rows AS (
+    SELECT
+      f.record_id,
+      f.event_ts,
+      f.agent_name,
+      f.user_name,
+      f.feedback_sentiment AS sentiment,
+      s.sentiment_source,
+      s.sentiment_reason,
+      f.feedback_message,
+      f.categories,
+      r.response_time_ms,
+      r.request_value,
+      r.request_response_json
+    FROM transformed_events f
+    JOIN selected_record_set s
+      ON s.record_id = f.record_id
+    LEFT JOIN transformed_events r
+      ON f.record_id = r.record_id
+      AND r.event_name = 'CORTEX_AGENT_REQUEST'
+    WHERE f.event_name = 'CORTEX_AGENT_FEEDBACK'
+  ),
+
+  inferred_rows AS (
+    SELECT
+      r.record_id,
+      r.event_ts,
+      r.agent_name,
+      r.user_name,
+      s.sentiment,
+      s.sentiment_source,
+      s.sentiment_reason,
+      NULL::VARCHAR AS feedback_message,
+      NULL::VARIANT AS categories,
+      r.response_time_ms,
+      r.request_value,
+      r.request_response_json
+    FROM transformed_events r
+    JOIN selected_record_set s
+      ON s.record_id = r.record_id
+    LEFT JOIN transformed_events f
+      ON r.record_id = f.record_id
+      AND f.event_name = 'CORTEX_AGENT_FEEDBACK'
+    WHERE r.event_name = 'CORTEX_AGENT_REQUEST'
+      AND f.record_id IS NULL
+      AND s.sentiment_source IN ('inferred', '%s', '%s')
+  ),
+
+  base_rows AS (
+    SELECT * FROM explicit_rows
+    UNION ALL
+    SELECT * FROM inferred_rows
+  ),
+
+  question_agg AS (
+    SELECT
+      s.record_id,
+      LISTAGG(msg_part.value:text::STRING, '') WITHIN GROUP (ORDER BY msg.index, msg_part.index) AS question
+    FROM base_rows s,
+         LATERAL FLATTEN(input => s.request_value:"snow.ai.observability.request_body":messages) msg,
+         LATERAL FLATTEN(input => msg.value:content) msg_part
+    WHERE msg.value:role::STRING = 'user'
+      AND msg_part.value:type::STRING = 'text'
+    GROUP BY s.record_id
+  ),
+
+  response_agg AS (
+    SELECT
+      s.record_id,
+      LISTAGG(resp_part.value:text::STRING, '') WITHIN GROUP (ORDER BY resp_part.index) AS response
+    FROM base_rows s,
+         LATERAL FLATTEN(input => s.request_response_json:content) resp_part
+    WHERE resp_part.value:type::STRING = 'text'
+    GROUP BY s.record_id
+  ),
+
+  tool_use_rows AS (
+    SELECT
+      s.record_id,
+      ROW_NUMBER() OVER (PARTITION BY s.record_id ORDER BY tool_part.index) AS tool_ordinal,
+      tool_part.value:tool_use:tool_use_id::STRING AS tool_use_id,
+      tool_part.value:tool_use:type::STRING AS tool_type,
+      tool_part.value:tool_use:name::STRING AS tool_name,
+      tool_part.value:tool_use:input:query::STRING AS query
+    FROM base_rows s,
+         LATERAL FLATTEN(input => s.request_response_json:content) tool_part
+    WHERE tool_part.value:type::STRING = 'tool_use'
+  ),
+
+  tool_result_rows AS (
+    SELECT
+      s.record_id,
+      result_part.value:tool_result:tool_use_id::STRING AS tool_use_id,
+      result_part.value:tool_result:status::STRING AS tool_status,
+      result_part.value:tool_result AS result_payload
+    FROM base_rows s,
+         LATERAL FLATTEN(input => s.request_response_json:content) result_part
+    WHERE result_part.value:type::STRING = 'tool_result'
+  ),
+
+  tool_result_agg AS (
+    SELECT
+      tr.record_id,
+      tr.tool_use_id,
+      tr.tool_status,
+      LISTAGG(result_content.value:json:sql::STRING, ',') AS sql
+    FROM tool_result_rows tr,
+         LATERAL FLATTEN(input => tr.result_payload:content) result_content
+    GROUP BY tr.record_id, tr.tool_use_id, tr.tool_status
+  ),
+
+  tool_agg AS (
+    SELECT
+      tu.record_id,
+      ARRAY_AGG(
+        OBJECT_CONSTRUCT(
+          'tool_type', tu.tool_type,
+          'tool_name', tu.tool_name,
+          'query', tu.query,
+          'tool_status', tr.tool_status,
+          'sql', tr.sql
+        )
+      ) WITHIN GROUP (ORDER BY tu.tool_ordinal) AS tool_uses
+    FROM tool_use_rows tu
+    LEFT JOIN tool_result_agg tr
+      ON tr.record_id = tu.record_id
+      AND tr.tool_use_id = tu.tool_use_id
+    GROUP BY tu.record_id
+  ),
+
+  final AS (
+    SELECT
+      s.record_id,
+      s.event_ts,
+      s.agent_name,
+      s.user_name,
+      s.sentiment,
+      s.sentiment_source,
+      s.sentiment_reason,
+      NULLIF(s.feedback_message, '') AS feedback_message,
+      s.categories,
+      q.question,
+      r.response,
+      s.response_time_ms,
+      tu.tool_uses,
+      s.request_value
+    FROM base_rows s
+    LEFT JOIN tool_agg tu ON tu.record_id = s.record_id
+    LEFT JOIN question_agg q ON q.record_id = s.record_id
+    LEFT JOIN response_agg r ON r.record_id = s.record_id
+  )
+
+  SELECT * FROM final
+) AS s ON t.record_id = s.record_id
+WHEN MATCHED THEN UPDATE SET
+  event_ts = s.event_ts,
+  agent_name = s.agent_name,
+  user_name = s.user_name,
+  sentiment = s.sentiment,
+  sentiment_source = s.sentiment_source,
+  sentiment_reason = s.sentiment_reason,
+  feedback_message = s.feedback_message,
+  categories = s.categories,
+  question = s.question,
+  response = s.response,
+  response_time_ms = s.response_time_ms,
+  tool_uses = s.tool_uses,
+  request_value = s.request_value,
+  checked = CASE
+    WHEN COALESCE(t.sentiment, '') <> 'negative' AND s.sentiment = 'negative' THEN FALSE
+    ELSE t.checked
+  END,
+  checked_at = CASE
+    WHEN COALESCE(t.sentiment, '') <> 'negative' AND s.sentiment = 'negative' THEN NULL
+    ELSE t.checked_at
+  END,
+  updated_at = CURRENT_TIMESTAMP()
+WHEN NOT MATCHED THEN INSERT (record_id, event_ts, agent_name, user_name, sentiment, sentiment_source, sentiment_reason, feedback_message, categories, question, response, response_time_ms, tool_uses, request_value)
+VALUES (s.record_id, s.event_ts, s.agent_name, s.user_name, s.sentiment, s.sentiment_source, s.sentiment_reason, s.feedback_message, s.categories, s.question, s.response, s.response_time_ms, s.tool_uses, s.request_value)`,
+		dstFQ, metaFQ, dstFQ, agentEsc, srcDBEsc, srcSchemaEsc, agentEsc, sentimentSourceInferredHeuristic, sentimentSourceInferredLLMJudge,
+	)
+	if _, err := c.executeStatement(ctx, dstDB, dstSchema, mergeStmt); err != nil {
+		return fmt.Errorf("merge selected feedback records: %w", err)
+	}
+
+	return nil
+}
+
 // SyncFeedbackFromEventsToTable merges feedback rows directly from observability
-// events into the remote feedback table without Go-side row materialization.
-// If since is non-empty (UTC timestamp string, e.g. "2006-01-02 15:04:05.000 UTC"),
-// only events with f.event_ts >= since are synced.
-func (c *Client) SyncFeedbackFromEventsToTable(ctx context.Context, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable, since string) error {
+// events into the remote feedback table without Go-side row materialization by
+// default. When opts.InferNegative is enabled, it falls back to Go-side
+// materialization so request-only interactions can be classified and upserted.
+func (c *Client) SyncFeedbackFromEventsToTable(ctx context.Context, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable string, opts FeedbackQueryOptions) error {
+	if opts.InferNegative {
+		ok, err := c.FeedbackInferenceColumnsExist(ctx, dstDB, dstSchema, dstTable)
+		if err != nil {
+			return fmt.Errorf("check inference columns: %w", err)
+		}
+		if !ok {
+			return fmt.Errorf("remote feedback table %s.%s.%s is missing infer-negative columns; run `coragent feedback --init` to recreate it", dstDB, dstSchema, dstTable)
+		}
+		records, err := c.GetFeedback(ctx, srcDB, srcSchema, agentName, FeedbackQueryOptions{
+			Since:         opts.Since,
+			ExplicitSince: opts.ExplicitSince,
+			RequestSince:  opts.RequestSince,
+			InferNegative: true,
+			JudgeModel:    opts.JudgeModel,
+		})
+		if err != nil {
+			return err
+		}
+		return c.syncInferNegativeFeedbackFromSource(ctx, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable, records)
+	}
+
 	dstFQ := fmt.Sprintf("%s.%s.%s",
 		identifierSegment(dstDB), identifierSegment(dstSchema), identifierSegment(dstTable))
 	srcDBEsc := escapeSQLString(unquoteIdentifier(srcDB))
@@ -809,8 +1655,8 @@ func (c *Client) SyncFeedbackFromEventsToTable(ctx context.Context, srcDB, srcSc
 	agentEsc := escapeSQLString(agentName)
 
 	srcWhereExtra := ""
-	if since != "" {
-		sinceEsc := escapeSQLString(sinceForSQL(since))
+	if opts.Since != "" {
+		sinceEsc := escapeSQLString(sinceForSQL(opts.Since))
 		srcWhereExtra = fmt.Sprintf(" AND f.event_ts >= TO_TIMESTAMP_TZ('%s', 'YYYY-MM-DD HH24:MI:SS.FF3 TZHTZM')", sinceEsc)
 	}
 
@@ -833,7 +1679,7 @@ WITH all_events AS (
         RESOURCE_ATTRIBUTES['snow.user.name']::STRING
       ) AS user_name,
       CASE WHEN TRY_TO_BOOLEAN(VALUE:positive::STRING) THEN 'positive' ELSE 'negative' END AS sentiment,
-      VALUE:feedback_message::STRING AS feedback_message,
+      NULLIF(VALUE:feedback_message::STRING, '') AS feedback_message,
       TO_JSON(VALUE:categories) AS categories,
       TRY_TO_NUMBER(VALUE:"snow.ai.observability.response_time_ms"::STRING) AS response_time_ms,
       TRY_PARSE_JSON(VALUE:"snow.ai.observability.response"::STRING) AS request_response_json,
@@ -961,7 +1807,7 @@ WITH all_events AS (
       agent_name,
       user_name,
       sentiment,
-      feedback_message,
+      NULLIF(feedback_message, '') AS feedback_message,
       categories,
       question,
       response,
@@ -1028,10 +1874,22 @@ func (c *Client) GetFeedbackFromTable(ctx context.Context, db, schema, table, ag
 	fq := fmt.Sprintf("%s.%s.%s",
 		identifierSegment(db), identifierSegment(schema), identifierSegment(table))
 	agentEsc := escapeSQLString(unquoteIdentifier(agentName))
+	colSet, err := c.feedbackTableColumnSet(ctx, db, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	sentimentSourceExpr := `'' AS sentiment_source`
+	if _, ok := colSet["sentiment_source"]; ok {
+		sentimentSourceExpr = "sentiment_source"
+	}
+	sentimentReasonExpr := `'' AS sentiment_reason`
+	if _, ok := colSet["sentiment_reason"]; ok {
+		sentimentReasonExpr = "sentiment_reason"
+	}
 	stmt := fmt.Sprintf(
-		`SELECT record_id, event_ts, agent_name, user_name, sentiment, feedback_message, categories, question, response, response_time_ms, tool_uses, request_value, checked, checked_at
+		`SELECT record_id, event_ts, agent_name, user_name, sentiment, %s, %s, feedback_message, categories, question, response, response_time_ms, tool_uses, request_value, checked, checked_at
 FROM %s WHERE agent_name = '%s' ORDER BY event_ts DESC NULLS LAST`,
-		fq, agentEsc)
+		sentimentSourceExpr, sentimentReasonExpr, fq, agentEsc)
 	resp, err := c.executeStatement(ctx, db, schema, stmt)
 	if err != nil {
 		return nil, err
@@ -1067,6 +1925,8 @@ FROM %s WHERE agent_name = '%s' ORDER BY event_ts DESC NULLS LAST`,
 		r.AgentName = getStr("agent_name")
 		r.UserName = getStr("user_name")
 		r.Sentiment = getStr("sentiment")
+		r.SentimentSource = getStr("sentiment_source")
+		r.SentimentReason = getStr("sentiment_reason")
 		r.FeedbackMessage = getStr("feedback_message")
 		r.Question = getStr("question")
 		r.Response = getStr("response")

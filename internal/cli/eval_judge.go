@@ -63,7 +63,7 @@ func effectiveThreshold(tc agent.EvalTestCase, agentDefault int) int {
 	return agentDefault
 }
 
-// judgeResponse calls SNOWFLAKE.CORTEX.COMPLETE with structured output to score
+// judgeResponse calls SNOWFLAKE.CORTEX.AI_COMPLETE with structured output to score
 // the actual response against the expected response. Returns score (0-100) and reasoning.
 func judgeResponse(ctx context.Context, client *api.Client, model, question, expectedResponse, actualResponse string) (judgeResult, error) {
 	prompt := fmt.Sprintf(
@@ -77,23 +77,24 @@ func judgeResponse(ctx context.Context, client *api.Client, model, question, exp
 	// Escape single quotes for SQL string literal
 	escapedPrompt := strings.ReplaceAll(prompt, "'", "''")
 
-	stmt := fmt.Sprintf(`SELECT SNOWFLAKE.CORTEX.COMPLETE(
-    '%s',
-    [{'role': 'user', 'content': '%s'}],
-    {
-        'temperature': 0,
-        'response_format': {
-            'type': 'json',
-            'schema': {
-                'type': 'object',
-                'properties': {
-                    'score': {'type': 'integer', 'description': '0-100 similarity score'},
-                    'reasoning': {'type': 'string', 'description': 'Brief explanation of the score'}
-                },
-                'required': ['score', 'reasoning']
-            }
+	stmt := fmt.Sprintf(`SELECT SNOWFLAKE.CORTEX.AI_COMPLETE(
+    model => '%s',
+    prompt => '%s',
+    model_parameters => {
+        'temperature': 0
+    },
+    response_format => {
+        'type': 'json',
+        'schema': {
+            'type': 'object',
+            'properties': {
+                'score': {'type': 'integer'},
+                'reasoning': {'type': 'string'}
+            },
+            'required': ['score', 'reasoning']
         }
-    }
+    },
+    show_details => TRUE
 ) AS response;`, model, escapedPrompt)
 
 	raw, err := client.CortexComplete(ctx, stmt)
@@ -104,9 +105,22 @@ func judgeResponse(ctx context.Context, client *api.Client, model, question, exp
 	return parseJudgeResponse(raw)
 }
 
-// parseJudgeResponse extracts the judgeResult from the COMPLETE function response.
-// With response_format, COMPLETE returns structured_output[0].raw_message containing the result directly.
+// parseJudgeResponse extracts the judgeResult from either the structured-output
+// wrapper or the direct schema object returned by AI_COMPLETE.
 func parseJudgeResponse(raw string) (judgeResult, error) {
+	var direct judgeResult
+	if err := json.Unmarshal([]byte(raw), &direct); err == nil {
+		if direct.Score != 0 || direct.Reasoning != "" {
+			if direct.Score < 0 {
+				direct.Score = 0
+			}
+			if direct.Score > 100 {
+				direct.Score = 100
+			}
+			return direct, nil
+		}
+	}
+
 	var completeResp struct {
 		StructuredOutput []struct {
 			RawMessage judgeResult `json:"raw_message"`

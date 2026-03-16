@@ -16,7 +16,8 @@ type CoragentConfig struct {
 
 // FeedbackSettings holds feedback-related configuration.
 type FeedbackSettings struct {
-	Remote FeedbackRemoteSettings `toml:"remote"`
+	JudgeModel string                 `toml:"judge_model"`
+	Remote     FeedbackRemoteSettings `toml:"remote"`
 }
 
 // FeedbackRemoteSettings configures Snowflake table persistence for feedback.

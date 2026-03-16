@@ -1,6 +1,11 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -74,6 +79,33 @@ func TestParseSnowflakeTimestamp(t *testing.T) {
 				t.Errorf("parseSnowflakeTimestamp(%q) = %q, want empty passthrough", tt.raw, got)
 			}
 		})
+	}
+}
+
+func TestSinceForSQL(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"utc suffix", "2026-03-08 00:00:00.000 UTC", "2026-03-08 00:00:00.000 +0000"},
+		{"already offset", "2026-03-08 00:00:00.000 +0900", "2026-03-08 00:00:00.000 +0900"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sinceForSQL(tt.input); got != tt.want {
+				t.Fatalf("sinceForSQL(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeFeedbackEventTimestamp(t *testing.T) {
+	got := normalizeFeedbackEventTimestamp("2026-03-08 00:00:00.000 UTC")
+	want := "2026-03-08 00:00:00.000 +0000"
+	if got != want {
+		t.Fatalf("normalizeFeedbackEventTimestamp() = %q, want %q", got, want)
 	}
 }
 
@@ -359,6 +391,323 @@ func TestProbeString(t *testing.T) {
 		got := probeString(m, []string{"nonexistent"})
 		if got != "" {
 			t.Errorf("probeString() = %q, want empty", got)
+		}
+	})
+}
+
+func TestParseNegativeInferenceResponse(t *testing.T) {
+	t.Run("structured output wrapper", func(t *testing.T) {
+		raw := `{"structured_output":[{"raw_message":{"negative":true,"reasoning":"The answer did not address the user's request"},"type":"json"}]}`
+		got, err := parseNegativeInferenceResponse(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !got.Negative {
+			t.Fatal("Negative = false, want true")
+		}
+		if got.Reasoning == "" {
+			t.Fatal("Reasoning should not be empty")
+		}
+	})
+
+	t.Run("direct schema object", func(t *testing.T) {
+		raw := `{"negative":true,"reasoning":"The answer did not address the user's request"}`
+		got, err := parseNegativeInferenceResponse(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !got.Negative {
+			t.Fatal("Negative = false, want true")
+		}
+		if got.Reasoning == "" {
+			t.Fatal("Reasoning should not be empty")
+		}
+	})
+}
+
+func TestSQLCellString(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   any
+		want    string
+		wantErr string
+	}{
+		{
+			name:  "string",
+			input: `{"structured_output":[{"raw_message":{"negative":true}}]}`,
+			want:  `{"structured_output":[{"raw_message":{"negative":true}}]}`,
+		},
+		{
+			name:  "variant object marshaled",
+			input: map[string]any{"structured_output": []any{map[string]any{"raw_message": map[string]any{"negative": true, "reasoning": "x"}}}},
+			want:  `{"structured_output":[{"raw_message":{"negative":true,"reasoning":"x"}}]}`,
+		},
+		{
+			name:    "null",
+			input:   nil,
+			wantErr: "null response",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := sqlCellString(tt.input)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("sqlCellString() error = nil, want %q", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("sqlCellString() error = %q, want substring %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("sqlCellString() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("sqlCellString() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInferNegativeFeedbackHeuristically(t *testing.T) {
+	tests := []struct {
+		name   string
+		record FeedbackRecord
+		wantOK bool
+		wantNg bool
+	}{
+		{
+			name: "empty response is negative",
+			record: FeedbackRecord{
+				Question: "show me the sales trend",
+				Response: "",
+			},
+			wantOK: true,
+			wantNg: true,
+		},
+		{
+			name: "missing requested year data is negative",
+			record: FeedbackRecord{
+				Question: "2026年の支出の傾向を教えてください",
+				Response: "申し訳ございませんが、データベースには2026年の支出データが存在しません。利用可能なデータは2024年のみです。代わりに2024年の分析は可能です。",
+			},
+			wantOK: true,
+			wantNg: true,
+		},
+		{
+			name: "substantive answer is not short-circuited",
+			record: FeedbackRecord{
+				Question: "show me the sales trend",
+				Response: "Sales increased 12% quarter over quarter, led by enterprise accounts.",
+			},
+			wantOK: false,
+			wantNg: false,
+		},
+		{
+			name: "generic status phrase is not short-circuited",
+			record: FeedbackRecord{
+				Question: "show all orders with status",
+				Response: "I found 3 rows where the status is Not Available and 7 rows marked Complete.",
+			},
+			wantOK: false,
+			wantNg: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := inferNegativeFeedbackHeuristically(tt.record)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if ok && got.Negative != tt.wantNg {
+				t.Fatalf("Negative = %v, want %v", got.Negative, tt.wantNg)
+			}
+			if ok && strings.TrimSpace(got.Reasoning) == "" {
+				t.Fatal("Reasoning should not be empty when heuristic applies")
+			}
+		})
+	}
+}
+
+func TestGetFeedbackInferNegativePreservesExplicitSince(t *testing.T) {
+	t.Parallel()
+
+	var statements []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/statements" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var req sqlStatementRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		statements = append(statements, req.Statement)
+		w.Header().Set("Content-Type", "application/json")
+		if len(statements) == 1 {
+			_ = json.NewEncoder(w).Encode(sqlStatementResponse{
+				ResultSetMetaData: struct {
+					RowType []sqlRowType `json:"rowType"`
+				}{RowType: []sqlRowType{{Name: "timestamp"}, {Name: "record_id"}}},
+				Data: [][]any{},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(sqlStatementResponse{
+			ResultSetMetaData: struct {
+				RowType []sqlRowType `json:"rowType"`
+			}{RowType: []sqlRowType{{Name: "timestamp"}, {Name: "record_id"}}},
+			Data: [][]any{},
+		})
+	}))
+	defer srv.Close()
+
+	client := newDescribeTestClient(t, srv)
+
+	_, err := client.GetFeedback(context.Background(), "DB", "SC", "agent", FeedbackQueryOptions{
+		Since:         "2026-03-08 12:34:56.000 UTC",
+		ExplicitSince: "",
+		RequestSince:  "2026-03-08 12:34:56.000 UTC",
+		InferNegative: true,
+	})
+	if err != nil {
+		t.Fatalf("GetFeedback() error = %v", err)
+	}
+	if len(statements) != 2 {
+		t.Fatalf("statement count = %d, want 2", len(statements))
+	}
+	if strings.Contains(statements[0], "f.TIMESTAMP >=") {
+		t.Fatalf("explicit query unexpectedly filtered by timestamp:\n%s", statements[0])
+	}
+	if !strings.Contains(statements[1], "r.TIMESTAMP >= TO_TIMESTAMP_TZ('2026-03-08 12:34:56.000 +0000'") {
+		t.Fatalf("request-only query missing request cursor:\n%s", statements[1])
+	}
+}
+
+func TestSyncFeedbackFromEventsToTableInferNegativePreservesExplicitSince(t *testing.T) {
+	t.Parallel()
+
+	var statements []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/statements" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var req sqlStatementRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		statements = append(statements, req.Statement)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch len(statements) {
+		case 1:
+			_ = json.NewEncoder(w).Encode(sqlStatementResponse{
+				ResultSetMetaData: struct {
+					RowType []sqlRowType `json:"rowType"`
+				}{RowType: []sqlRowType{{Name: "column_name"}}},
+				Data: [][]any{
+					{"record_id"},
+					{"sentiment_source"},
+					{"sentiment_reason"},
+				},
+			})
+		case 2:
+			_ = json.NewEncoder(w).Encode(sqlStatementResponse{
+				ResultSetMetaData: struct {
+					RowType []sqlRowType `json:"rowType"`
+				}{RowType: []sqlRowType{
+					{Name: "timestamp"},
+					{Name: "resource_attributes"},
+					{Name: "feedback_attrs"},
+					{Name: "feedback_value"},
+					{Name: "request_value"},
+					{Name: "record_id"},
+				}},
+				Data: [][]any{{
+					"2026-03-08T12:34:56.000Z",
+					`{"snow.user.name":"user1"}`,
+					`{"snow.ai.observability.object.name":"agent","snow.ai.observability.user.name":"user1"}`,
+					`{"positive":false,"feedback_message":"not helpful","categories":["quality"]}`,
+					`{"snow.ai.observability.request_body":{"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]},"snow.ai.observability.response":"{\"content\":[{\"type\":\"text\",\"text\":\"answer\"}]}","snow.ai.observability.response_time_ms":"123"}`,
+					"rid-1",
+				}},
+			})
+		default:
+			_ = json.NewEncoder(w).Encode(sqlStatementResponse{
+				ResultSetMetaData: struct {
+					RowType []sqlRowType `json:"rowType"`
+				}{RowType: []sqlRowType{{Name: "timestamp"}, {Name: "record_id"}}},
+				Data: [][]any{},
+			})
+		}
+	}))
+	defer srv.Close()
+
+	client := newDescribeTestClient(t, srv)
+
+	err := client.SyncFeedbackFromEventsToTable(context.Background(), "SRC_DB", "SRC_SC", "agent", "DST_DB", "DST_SC", "DST_TABLE", FeedbackQueryOptions{
+		Since:         "2026-03-08 12:34:56.000 UTC",
+		ExplicitSince: "",
+		RequestSince:  "2026-03-08 12:34:56.000 UTC",
+		InferNegative: true,
+	})
+	if err != nil {
+		t.Fatalf("SyncFeedbackFromEventsToTable() error = %v", err)
+	}
+	if len(statements) < 6 {
+		t.Fatalf("statement count = %d, want at least 6", len(statements))
+	}
+	if !strings.HasPrefix(statements[0], "SHOW COLUMNS IN TABLE") {
+		t.Fatalf("first statement = %q, want SHOW COLUMNS", statements[0])
+	}
+	if strings.Contains(statements[1], "f.TIMESTAMP >=") {
+		t.Fatalf("explicit query unexpectedly filtered by timestamp:\n%s", statements[1])
+	}
+	if !strings.Contains(statements[2], "r.TIMESTAMP >= TO_TIMESTAMP_TZ('2026-03-08 12:34:56.000 +0000'") {
+		t.Fatalf("request-only query missing request cursor:\n%s", statements[2])
+	}
+	if !strings.Contains(statements[4], "(record_id, sentiment, sentiment_source, sentiment_reason)") {
+		t.Fatalf("selection-stage insert should only stage metadata:\n%s", statements[4])
+	}
+	if strings.Contains(statements[4], "question") || strings.Contains(statements[4], "request_value") {
+		t.Fatalf("selection-stage insert should not inline large request payloads:\n%s", statements[4])
+	}
+	if !strings.Contains(statements[5], "WITH selected_records AS (") {
+		t.Fatalf("merge statement should load rows from selected source records:\n%s", statements[5])
+	}
+	if !strings.Contains(statements[5], "GET_AI_OBSERVABILITY_EVENTS('SRC_DB', 'SRC_SC', 'agent', 'CORTEX AGENT')") {
+		t.Fatalf("merge statement should reload rows from observability events:\n%s", statements[5])
+	}
+	if !strings.Contains(statements[5], "WHEN COALESCE(t.sentiment, '') <> 'negative' AND s.sentiment = 'negative' THEN FALSE") {
+		t.Fatalf("merge statement should reopen records that became negative:\n%s", statements[5])
+	}
+}
+
+func TestMergeFeedbackRecords(t *testing.T) {
+	explicit := []FeedbackRecord{
+		{RecordID: "r1", Timestamp: "2026-03-08 10:00:00.000 UTC", FeedbackMessage: "explicit"},
+	}
+	inferred := []FeedbackRecord{
+		{RecordID: "r1", Timestamp: "2026-03-08 11:00:00.000 UTC", SentimentSource: "inferred_llm_judge"},
+		{RecordID: "r2", Timestamp: "2026-03-08 12:00:00.000 UTC", SentimentSource: "inferred_heuristic"},
+	}
+
+	t.Run("infer disabled returns explicit only", func(t *testing.T) {
+		got := mergeFeedbackRecords(explicit, inferred, false)
+		if len(got) != 1 || got[0].RecordID != "r1" {
+			t.Fatalf("got = %+v, want only explicit r1", got)
+		}
+	})
+
+	t.Run("infer enabled appends non-duplicate inferred and sorts", func(t *testing.T) {
+		got := mergeFeedbackRecords(explicit, inferred, true)
+		if len(got) != 2 {
+			t.Fatalf("len(got) = %d, want 2", len(got))
+		}
+		if got[0].RecordID != "r2" || got[1].RecordID != "r1" {
+			t.Fatalf("unexpected order/contents: %+v", got)
 		}
 	})
 }

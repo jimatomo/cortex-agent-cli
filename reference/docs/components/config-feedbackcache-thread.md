@@ -25,6 +25,7 @@ Load project and user settings from `.coragent.toml`.
 
 ### Settings (Feedback)
 
+- `feedback.judge_model` — Model used by `feedback --infer-negative` (default: `llama4-scout`)
 - `feedback.remote.enabled` — Enable remote feedback table mode
 - `feedback.remote.database`, `schema`, `table` — Remote feedback table location
 
@@ -41,9 +42,30 @@ Cache feedback records locally to support incremental review and "checked" filte
 ### Storage
 
 - **Path:** `~/.coragent/feedback/<agent>.json`
-- **Format:** JSON array of feedback records
-- **Merge:** New records from `GetFeedback` merged with cache; duplicates avoided
+- **Format:** JSON object with a top-level `records` array
+- **Merge:** New records from `GetFeedback` merged with cache by `record_id`; checked state is preserved while refreshed records can replace older inferred data
 - **Checked:** Records can be marked checked; `--include-checked` shows them; default hides
+- **No refresh:** `feedback --no-refresh` reads the existing cache as-is and skips `GetFeedback` plus cache rewrite
+- **Inference metadata:** When `feedback --infer-negative` is used, cached records can include inferred sentiment provenance/reason fields
+
+### Inference Semantics
+
+- **Default mode:** Cache contains only explicit feedback-derived rows.
+- **`--infer-negative` mode:** Cache may additionally contain request-only rows that were classified by `SNOWFLAKE.CORTEX.AI_COMPLETE`; negative results surface by default, while positive inferred rows are still cached so they are not re-judged on later runs.
+- **Refresh scope:** In inference mode the command keeps request-only inference incremental with `LatestTimestamp()`, but explicit feedback is reloaded on each refresh so newer explicit feedback cannot be hidden behind a later request timestamp from another record.
+- **Conflict rule:** If the same `record_id` later receives explicit feedback, the explicit row replaces the inferred row's mutable payload while preserving `Checked`.
+
+### SQL Interaction Summary
+
+- **Explicit-only refresh:** one observability `SELECT` over `GET_AI_OBSERVABILITY_EVENTS` with feedback/request `LEFT JOIN`
+- **Inference refresh:** the explicit `SELECT` above plus:
+  - one request-only candidate `SELECT`
+  - one `SELECT SNOWFLAKE.CORTEX.AI_COMPLETE(...)` per candidate row
+- **Remote inferred persistence:** may additionally issue:
+  - one schema check to confirm `sentiment_source` / `sentiment_reason` already exist
+  - `CREATE TRANSIENT TABLE ...`
+  - batched `INSERT INTO ... UNION ALL ...`
+  - final `MERGE INTO ...`
 
 ## Thread (`internal/thread`)
 

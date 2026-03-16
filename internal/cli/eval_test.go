@@ -594,6 +594,20 @@ func TestParseJudgeResponse(t *testing.T) {
 		}
 	})
 
+	t.Run("direct schema object response", func(t *testing.T) {
+		raw := `{"score":85,"reasoning":"Good match"}`
+		result, err := parseJudgeResponse(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Score != 85 {
+			t.Errorf("score = %d, want 85", result.Score)
+		}
+		if result.Reasoning != "Good match" {
+			t.Errorf("reasoning = %q, want %q", result.Reasoning, "Good match")
+		}
+	})
+
 	t.Run("full COMPLETE response", func(t *testing.T) {
 		raw := `{
 			"created": 1771036914,
