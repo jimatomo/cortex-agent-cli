@@ -55,17 +55,18 @@ These flows cover agent execution (`run`), feedback retrieval (`feedback`), and 
 1. Start from the normal feedback flow; explicit `CORTEX_AGENT_FEEDBACK` rows are always loaded first.
 2. When the flag is enabled, query `CORTEX_AGENT_REQUEST` rows that do not have a matching feedback event for the same `record_id`.
 3. Extract `question`, `response`, `tool_uses`, and `response_time_ms` from the request payload.
-4. Build a single-string structured-output `SNOWFLAKE.CORTEX.AI_COMPLETE` prompt asking whether the interaction should be treated as implicit negative feedback because the user's goal was substantially unmet. The model defaults to `llama4-scout` and can be overridden with `feedback.judge_model`.
-5. Convert the model result into inferred sentiment:
+4. Apply a narrow heuristic only for obvious non-answers or explicit unavailable-data responses; ambiguous phrases fall through to model judgment.
+5. Build a single-string structured-output `SNOWFLAKE.CORTEX.AI_COMPLETE` prompt asking whether the interaction should be treated as implicit negative feedback because the user's goal was substantially unmet. The model defaults to `llama4-scout` and can be overridden with `feedback.judge_model`.
+6. Convert the model result into inferred sentiment:
    - `negative = true` becomes `sentiment = negative`
    - `negative = false` becomes `sentiment = positive`
    - attach provenance fields such as `sentiment_source = inferred` and the returned reasoning in either case
-6. Merge explicit and inferred rows by `record_id`:
+7. Merge explicit and inferred rows by `record_id`:
    - explicit feedback wins over inferred feedback for the same record
    - local cache keeps checked state while refreshing mutable fields
    - remote persistence updates mutable fields in-place during upsert and normalizes inferred-row timestamps so `event_ts` remains populated
-7. If `--no-refresh` is also set, none of the above inference work runs; the command only reads previously saved rows.
-8. During refresh, inference mode keeps request-only candidates incremental via the request timestamp cursor, but explicit feedback is always reloaded so late-arriving feedback cannot be skipped by a newer inferred-request timestamp from another record.
+8. If `--no-refresh` is also set, none of the above inference work runs; the command only reads previously saved rows.
+9. During refresh, inference mode keeps request-only candidates incremental via the request timestamp cursor, but explicit feedback is always reloaded so late-arriving feedback cannot be skipped by a newer inferred-request timestamp from another record.
 
 ### SQL Statements
 
@@ -154,10 +155,10 @@ Inference mode switches to a Go-orchestrated SQL sequence:
 1. verify the remote table already has `sentiment_source` and `sentiment_reason`
 2. if either column is missing, stop and instruct the user to run `coragent feedback --init` so the table is recreated with the full schema
 3. explicit/request-only rows are fetched and classified in Go
-4. `CREATE TRANSIENT TABLE TMP_FEEDBACK_STAGE_<timestamp> (...)`
-5. batched `INSERT INTO <stage> ... UNION ALL ...`
-6. final upsert:
-   - `MERGE INTO <target> AS t USING (<stage_select>) AS s ON t.record_id = s.record_id`
+4. `CREATE TRANSIENT TABLE TMP_FEEDBACK_SELECTION_<timestamp> (...)`
+5. batched `INSERT INTO <selection>` loads only `record_id`, `sentiment`, `sentiment_source`, and `sentiment_reason`
+6. final upsert reloads the large request/response payload from observability events instead of inlining it in the staged insert:
+   - `MERGE INTO <target> AS t USING (WITH selected_records AS (...) ... GET_AI_OBSERVABILITY_EVENTS(...) ...) AS s ON t.record_id = s.record_id`
    - `WHEN MATCHED THEN UPDATE SET ...`
    - `WHEN NOT MATCHED THEN INSERT (...)`
 
