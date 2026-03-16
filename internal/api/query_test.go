@@ -680,6 +680,9 @@ func TestSyncFeedbackFromEventsToTableInferNegativePreservesExplicitSince(t *tes
 	if !strings.Contains(statements[5], "GET_AI_OBSERVABILITY_EVENTS('SRC_DB', 'SRC_SC', 'agent', 'CORTEX AGENT')") {
 		t.Fatalf("merge statement should reload rows from observability events:\n%s", statements[5])
 	}
+	if !strings.Contains(statements[5], "WHEN COALESCE(t.sentiment, '') <> 'negative' AND s.sentiment = 'negative' THEN FALSE") {
+		t.Fatalf("merge statement should reopen records that became negative:\n%s", statements[5])
+	}
 }
 
 func TestMergeFeedbackRecords(t *testing.T) {
@@ -687,8 +690,8 @@ func TestMergeFeedbackRecords(t *testing.T) {
 		{RecordID: "r1", Timestamp: "2026-03-08 10:00:00.000 UTC", FeedbackMessage: "explicit"},
 	}
 	inferred := []FeedbackRecord{
-		{RecordID: "r1", Timestamp: "2026-03-08 11:00:00.000 UTC", SentimentSource: "inferred"},
-		{RecordID: "r2", Timestamp: "2026-03-08 12:00:00.000 UTC", SentimentSource: "inferred"},
+		{RecordID: "r1", Timestamp: "2026-03-08 11:00:00.000 UTC", SentimentSource: "inferred_llm_judge"},
+		{RecordID: "r2", Timestamp: "2026-03-08 12:00:00.000 UTC", SentimentSource: "inferred_heuristic"},
 	}
 
 	t.Run("infer disabled returns explicit only", func(t *testing.T) {

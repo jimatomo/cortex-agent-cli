@@ -55,12 +55,12 @@ These flows cover agent execution (`run`), feedback retrieval (`feedback`), and 
 1. Start from the normal feedback flow; explicit `CORTEX_AGENT_FEEDBACK` rows are always loaded first.
 2. When the flag is enabled, query `CORTEX_AGENT_REQUEST` rows that do not have a matching feedback event for the same `record_id`.
 3. Extract `question`, `response`, `tool_uses`, and `response_time_ms` from the request payload.
-4. Apply a narrow heuristic only for obvious non-answers or explicit unavailable-data responses; ambiguous phrases fall through to model judgment.
+4. Apply a narrow heuristic only for obvious non-answers or explicit unavailable-data responses; ambiguous phrases fall through to model judgment. Heuristic hits are stored with `sentiment_source = inferred_heuristic`.
 5. Build a single-string structured-output `SNOWFLAKE.CORTEX.AI_COMPLETE` prompt asking whether the interaction should be treated as implicit negative feedback because the user's goal was substantially unmet. The model defaults to `llama4-scout` and can be overridden with `feedback.judge_model`.
 6. Convert the model result into inferred sentiment:
    - `negative = true` becomes `sentiment = negative`
    - `negative = false` becomes `sentiment = positive`
-   - attach provenance fields such as `sentiment_source = inferred` and the returned reasoning in either case
+   - attach provenance fields such as `sentiment_source = inferred_llm_judge` and the returned reasoning in either case
 7. Merge explicit and inferred rows by `record_id`:
    - explicit feedback wins over inferred feedback for the same record
    - local cache keeps checked state while refreshing mutable fields
@@ -162,7 +162,7 @@ Inference mode switches to a Go-orchestrated SQL sequence:
    - `WHEN MATCHED THEN UPDATE SET ...`
    - `WHEN NOT MATCHED THEN INSERT (...)`
 
-The `WHEN MATCHED` branch updates mutable fields such as `sentiment`, `sentiment_source`, `sentiment_reason`, `feedback_message`, `question`, `response`, `tool_uses`, and `request_value`, but does not overwrite checked-state columns.
+The `WHEN MATCHED` branch updates mutable fields such as `sentiment`, `sentiment_source`, `sentiment_reason`, `feedback_message`, `question`, `response`, `tool_uses`, and `request_value`. Checked state is preserved unless a row transitions from non-negative to `negative`, in which case it is reopened by setting `checked = FALSE` and `checked_at = NULL`.
 
 ### Dependencies
 

@@ -519,7 +519,7 @@ func TestFeedbackInferNegativePassesOptionToGetFeedback(t *testing.T) {
 				RecordID:        "r1",
 				Timestamp:       "2026-03-08 00:00:00.000 UTC",
 				Sentiment:       "negative",
-				SentimentSource: "inferred",
+				SentimentSource: "inferred_llm_judge",
 				SentimentReason: "goal not achieved",
 			}}, nil
 		},
@@ -548,7 +548,7 @@ func TestFeedbackInferNegativePassesOptionToGetFeedback(t *testing.T) {
 	if gotOpts.JudgeModel != defaultFeedbackJudgeModel {
 		t.Fatalf("JudgeModel = %q, want %q", gotOpts.JudgeModel, defaultFeedbackJudgeModel)
 	}
-	if !strings.Contains(out.String(), `"sentiment_source": "inferred"`) {
+	if !strings.Contains(out.String(), `"sentiment_source": "inferred_llm_judge"`) {
 		t.Fatalf("expected inferred source in JSON output, got:\n%s", out.String())
 	}
 }
@@ -720,7 +720,7 @@ func TestFeedbackInferNegativeCachesPositiveInferredRecord(t *testing.T) {
 				RecordID:        "inferred-positive-1",
 				Timestamp:       "2026-03-09 10:00:00.000 UTC",
 				Sentiment:       "positive",
-				SentimentSource: "inferred",
+				SentimentSource: "inferred_llm_judge",
 				SentimentReason: "the answer substantially met the user's goal",
 				Question:        "show me sales",
 				Response:        "here are the sales figures",
@@ -750,8 +750,8 @@ func TestFeedbackInferNegativeCachesPositiveInferredRecord(t *testing.T) {
 	if cache.Records[0].Sentiment != "positive" {
 		t.Fatalf("cached sentiment = %q, want positive", cache.Records[0].Sentiment)
 	}
-	if cache.Records[0].SentimentSource != "inferred" {
-		t.Fatalf("cached sentiment_source = %q, want inferred", cache.Records[0].SentimentSource)
+	if cache.Records[0].SentimentSource != "inferred_llm_judge" {
+		t.Fatalf("cached sentiment_source = %q, want inferred_llm_judge", cache.Records[0].SentimentSource)
 	}
 }
 
@@ -996,13 +996,13 @@ func TestPrintOneRecord_ShowsInferenceMetadata(t *testing.T) {
 			Timestamp:       "2026-03-08 00:00:00.000 UTC",
 			UserName:        "alice",
 			Sentiment:       "negative",
-			SentimentSource: "inferred",
+			SentimentSource: "inferred_heuristic",
 			SentimentReason: "The response did not answer the user's request.",
 		},
 	}, false, true)
 
 	got := out.String()
-	if !strings.Contains(got, "Source:    inferred") {
+	if !strings.Contains(got, "Source:    inferred_heuristic") {
 		t.Fatalf("expected inferred source in output, got:\n%s", got)
 	}
 	if !strings.Contains(got, "Reason:    The response did not answer the user's request.") {

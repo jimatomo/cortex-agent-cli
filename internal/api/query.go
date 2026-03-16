@@ -135,6 +135,11 @@ type negativeInferenceResult struct {
 	Reasoning string `json:"reasoning"`
 }
 
+const (
+	sentimentSourceInferredHeuristic = "inferred_heuristic"
+	sentimentSourceInferredLLMJudge  = "inferred_llm_judge"
+)
+
 // ToolUseInfo captures a single tool invocation from the agent's response.
 type ToolUseInfo struct {
 	ToolType   string `json:"tool_type"`             // e.g., "cortex_analyst_text_to_sql"
@@ -176,7 +181,7 @@ func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName string, 
 			} else {
 				candidate.Sentiment = "positive"
 			}
-			candidate.SentimentSource = "inferred"
+			candidate.SentimentSource = sentimentSourceInferredHeuristic
 			candidate.SentimentReason = result.Reasoning
 			inferred = append(inferred, candidate)
 			continue
@@ -190,7 +195,7 @@ func (c *Client) GetFeedback(ctx context.Context, db, schema, agentName string, 
 		} else {
 			candidate.Sentiment = "positive"
 		}
-		candidate.SentimentSource = "inferred"
+		candidate.SentimentSource = sentimentSourceInferredLLMJudge
 		candidate.SentimentReason = result.Reasoning
 		inferred = append(inferred, candidate)
 	}
@@ -1237,6 +1242,14 @@ WHEN MATCHED THEN UPDATE SET
   response_time_ms = s.response_time_ms,
   tool_uses = s.tool_uses,
   request_value = s.request_value,
+  checked = CASE
+    WHEN COALESCE(t.sentiment, '') <> 'negative' AND s.sentiment = 'negative' THEN FALSE
+    ELSE t.checked
+  END,
+  checked_at = CASE
+    WHEN COALESCE(t.sentiment, '') <> 'negative' AND s.sentiment = 'negative' THEN NULL
+    ELSE t.checked_at
+  END,
   updated_at = CURRENT_TIMESTAMP()
 WHEN NOT MATCHED THEN INSERT (record_id, event_ts, agent_name, user_name, sentiment, sentiment_source, sentiment_reason, feedback_message, categories, question, response, response_time_ms, tool_uses, request_value)
 VALUES (s.record_id, s.event_ts, s.agent_name, s.user_name, s.sentiment, s.sentiment_source, s.sentiment_reason, s.feedback_message, s.categories, s.question, s.response, s.response_time_ms, s.tool_uses, s.request_value)`,
@@ -1311,15 +1324,14 @@ func (c *Client) stageFeedbackSelectionRecords(ctx context.Context, db, schema, 
 }
 
 func (c *Client) syncInferNegativeFeedbackFromSource(ctx context.Context, srcDB, srcSchema, agentName, dstDB, dstSchema, dstTable string, records []FeedbackRecord) error {
-	if len(records) == 0 {
-		return c.normalizeFeedbackTableEmptyStrings(ctx, dstDB, dstSchema, dstTable, agentName)
-	}
-
 	if !feedbackRecordsHaveStableRecordIDs(records) {
+		if len(records) == 0 {
+			return nil
+		}
 		if err := c.UpsertFeedbackRecords(ctx, dstDB, dstSchema, dstTable, records); err != nil {
 			return err
 		}
-		return c.normalizeFeedbackTableEmptyStrings(ctx, dstDB, dstSchema, dstTable, agentName)
+		return nil
 	}
 
 	dstFQ := fmt.Sprintf("%s.%s.%s",
@@ -1359,6 +1371,42 @@ WITH selected_records AS (
       sentiment_source,
       sentiment_reason
     FROM %s
+  ),
+
+  records_needing_normalization AS (
+    SELECT
+      record_id,
+      sentiment,
+      NULLIF(sentiment_source, '') AS sentiment_source,
+      NULLIF(sentiment_reason, '') AS sentiment_reason
+    FROM %s
+    WHERE agent_name = '%s'
+      AND (
+        sentiment_source = ''
+        OR sentiment_reason = ''
+        OR feedback_message = ''
+      )
+  ),
+
+  selected_record_set AS (
+    SELECT
+      record_id,
+      sentiment,
+      sentiment_source,
+      sentiment_reason
+    FROM selected_records
+    UNION ALL
+    SELECT
+      n.record_id,
+      n.sentiment,
+      n.sentiment_source,
+      n.sentiment_reason
+    FROM records_needing_normalization n
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM selected_records s
+      WHERE s.record_id = n.record_id
+    )
   ),
 
   all_events AS (
@@ -1401,7 +1449,7 @@ WITH selected_records AS (
       r.request_value,
       r.request_response_json
     FROM transformed_events f
-    JOIN selected_records s
+    JOIN selected_record_set s
       ON s.record_id = f.record_id
     LEFT JOIN transformed_events r
       ON f.record_id = r.record_id
@@ -1424,14 +1472,14 @@ WITH selected_records AS (
       r.request_value,
       r.request_response_json
     FROM transformed_events r
-    JOIN selected_records s
+    JOIN selected_record_set s
       ON s.record_id = r.record_id
     LEFT JOIN transformed_events f
       ON r.record_id = f.record_id
       AND f.event_name = 'CORTEX_AGENT_FEEDBACK'
     WHERE r.event_name = 'CORTEX_AGENT_REQUEST'
       AND f.record_id IS NULL
-      AND s.sentiment_source = 'inferred'
+      AND s.sentiment_source IN ('inferred', '%s', '%s')
   ),
 
   base_rows AS (
@@ -1554,39 +1602,23 @@ WHEN MATCHED THEN UPDATE SET
   response_time_ms = s.response_time_ms,
   tool_uses = s.tool_uses,
   request_value = s.request_value,
+  checked = CASE
+    WHEN COALESCE(t.sentiment, '') <> 'negative' AND s.sentiment = 'negative' THEN FALSE
+    ELSE t.checked
+  END,
+  checked_at = CASE
+    WHEN COALESCE(t.sentiment, '') <> 'negative' AND s.sentiment = 'negative' THEN NULL
+    ELSE t.checked_at
+  END,
   updated_at = CURRENT_TIMESTAMP()
 WHEN NOT MATCHED THEN INSERT (record_id, event_ts, agent_name, user_name, sentiment, sentiment_source, sentiment_reason, feedback_message, categories, question, response, response_time_ms, tool_uses, request_value)
 VALUES (s.record_id, s.event_ts, s.agent_name, s.user_name, s.sentiment, s.sentiment_source, s.sentiment_reason, s.feedback_message, s.categories, s.question, s.response, s.response_time_ms, s.tool_uses, s.request_value)`,
-		dstFQ, metaFQ, srcDBEsc, srcSchemaEsc, agentEsc,
+		dstFQ, metaFQ, dstFQ, agentEsc, srcDBEsc, srcSchemaEsc, agentEsc, sentimentSourceInferredHeuristic, sentimentSourceInferredLLMJudge,
 	)
 	if _, err := c.executeStatement(ctx, dstDB, dstSchema, mergeStmt); err != nil {
 		return fmt.Errorf("merge selected feedback records: %w", err)
 	}
 
-	return c.normalizeFeedbackTableEmptyStrings(ctx, dstDB, dstSchema, dstTable, agentName)
-}
-
-func (c *Client) normalizeFeedbackTableEmptyStrings(ctx context.Context, db, schema, table, agentName string) error {
-	fq := fmt.Sprintf("%s.%s.%s",
-		identifierSegment(db), identifierSegment(schema), identifierSegment(table))
-	agentEsc := escapeSQLString(agentName)
-	stmt := fmt.Sprintf(
-		`UPDATE %s
-SET
-  sentiment_source = NULLIF(sentiment_source, ''),
-  sentiment_reason = NULLIF(sentiment_reason, ''),
-  feedback_message = NULLIF(feedback_message, '')
-WHERE agent_name = '%s'
-  AND (
-    sentiment_source = ''
-    OR sentiment_reason = ''
-    OR feedback_message = ''
-  )`,
-		fq, agentEsc,
-	)
-	if _, err := c.executeStatement(ctx, db, schema, stmt); err != nil {
-		return fmt.Errorf("normalize empty feedback fields: %w", err)
-	}
 	return nil
 }
 

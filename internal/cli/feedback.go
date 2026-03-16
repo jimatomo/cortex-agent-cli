@@ -563,7 +563,7 @@ func printOneRecord(cmd *cobra.Command, idx, total int, r feedbackcache.Record, 
 	default:
 		fmt.Fprintf(cmd.OutOrStdout(), "      Sentiment: %s\n", r.Sentiment)
 	}
-	if r.SentimentSource == "inferred" || r.SentimentReason != "" {
+	if strings.HasPrefix(r.SentimentSource, "inferred") || r.SentimentReason != "" {
 		fmt.Fprintf(cmd.OutOrStdout(), "      Source:    %s\n", r.SentimentSource)
 	}
 	if r.SentimentReason != "" {
