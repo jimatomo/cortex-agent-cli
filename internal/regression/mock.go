@@ -160,6 +160,8 @@ func (ms *MockServer) handleSQL(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasPrefix(upper, "DESCRIBE AGENT "):
 		ms.handleDescribeAgent(w, stmt)
+	case strings.HasPrefix(upper, "SHOW AGENTS IN SCHEMA "):
+		ms.handleShowAgents(w)
 	case strings.HasPrefix(upper, "SHOW GRANTS ON AGENT "):
 		ms.handleShowGrants(w, stmt)
 	case strings.HasPrefix(upper, "GRANT "):
@@ -201,6 +203,24 @@ func (ms *MockServer) handleDescribeAgent(w http.ResponseWriter, stmt string) {
 	}
 	resp.Data = [][]any{
 		{string(specJSON), name, "", nil},
+	}
+	writeJSON(w, resp)
+}
+
+func (ms *MockServer) handleShowAgents(w http.ResponseWriter) {
+	list := ms.store.list()
+	var resp sqlStatementResponse
+	resp.ResultSetMetaData.RowType = []struct {
+		Name string `json:"name"`
+	}{
+		{Name: "name"},
+		{Name: "comment"},
+	}
+	resp.Data = make([][]any, 0, len(list))
+	for _, payload := range list {
+		name, _ := payload["name"].(string)
+		comment, _ := payload["comment"].(string)
+		resp.Data = append(resp.Data, []any{name, comment})
 	}
 	writeJSON(w, resp)
 }
