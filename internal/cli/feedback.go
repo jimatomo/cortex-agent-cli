@@ -140,7 +140,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 					if err != nil {
 						return err
 					}
-					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					ctx, cancel := context.WithTimeout(commandContext("feedback"), 30*time.Second)
 					defer cancel()
 					exists, err := client.FeedbackTableExists(ctx, remoteDb, remoteSchema, remoteTable)
 					if err != nil {
@@ -177,7 +177,7 @@ By default, only negative feedback is shown. Use --all to show all feedback.`,
 				return nil
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(commandContext("feedback"), 60*time.Second)
 			defer cancel()
 
 			var remoteClient feedbackClient
@@ -422,7 +422,7 @@ func runFeedbackInit(cmd *cobra.Command, opts *RootOptions, appCfg config.Corage
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(commandContext("feedback"), 30*time.Second)
 	defer cancel()
 	exists, err := client.FeedbackTableExists(ctx, db, schema, table)
 	if err != nil {

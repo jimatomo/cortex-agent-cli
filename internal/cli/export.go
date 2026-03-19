@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -36,7 +35,7 @@ func newExportCmd(opts *RootOptions) *cobra.Command {
 				return err
 			}
 
-			result, err := client.DescribeAgent(context.Background(), target.Database, target.Schema, name)
+			result, err := client.DescribeAgent(commandContext("export"), target.Database, target.Schema, name)
 			if err != nil {
 				return err
 			}
@@ -194,4 +193,3 @@ func reorderMappingKeys(node *yaml.Node, priority []string) {
 	}
 	node.Content = result
 }
-

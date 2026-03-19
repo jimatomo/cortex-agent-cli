@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -57,7 +56,7 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 				return err
 			}
 
-			planItems, err := buildPlanItems(context.Background(), specs, opts, cfg, client, client)
+			planItems, err := buildPlanItems(commandContext("apply"), specs, opts, cfg, client, client)
 			if err != nil {
 				return err
 			}
@@ -87,7 +86,7 @@ func newApplyCmd(opts *RootOptions) *cobra.Command {
 				}
 			}
 
-			appliedItems, err := executeApply(context.Background(), planItems, client, client)
+			appliedItems, err := executeApply(commandContext("apply"), planItems, client, client)
 			if err != nil {
 				return err
 			}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"coragent/internal/api"
 	"coragent/internal/auth"
+	"coragent/internal/config"
 	"coragent/internal/grant"
 )
 
@@ -21,6 +23,7 @@ func buildClient(opts *RootOptions) (*api.Client, error) {
 	if err != nil {
 		return nil, UserErr(err)
 	}
+	client.SetQueryTagBase(strings.TrimSpace(config.LoadCoragentConfig().QueryTag.Base))
 	return client, nil
 }
 
@@ -33,7 +36,12 @@ func buildClientAndCfg(opts *RootOptions) (*api.Client, auth.Config, error) {
 	if err != nil {
 		return nil, auth.Config{}, UserErr(err)
 	}
+	client.SetQueryTagBase(strings.TrimSpace(config.LoadCoragentConfig().QueryTag.Base))
 	return client, cfg, nil
+}
+
+func commandContext(command string) context.Context {
+	return api.WithQueryTagCommand(context.Background(), command)
 }
 
 // confirm prints a [y/N] prompt to stdout and reads one line from r.

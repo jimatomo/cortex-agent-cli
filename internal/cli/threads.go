@@ -193,7 +193,7 @@ func handleDeleteMode(reader *bufio.Reader, client *api.Client, state *thread.St
 	}
 
 	// Delete threads
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(commandContext("threads"), 30*time.Second)
 	defer cancel()
 
 	for _, t := range toDelete {
@@ -241,7 +241,7 @@ func deleteThreadByID(client *api.Client, state *thread.StateStore, threadID str
 	}
 
 	// Delete from API
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(commandContext("threads"), 30*time.Second)
 	defer cancel()
 
 	if err := client.DeleteThread(ctx, threadID); err != nil {

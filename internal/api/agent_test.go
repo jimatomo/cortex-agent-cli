@@ -247,6 +247,63 @@ func TestDescribeAgentFull_ToolResources(t *testing.T) {
 	}
 }
 
+func TestListAgents_ShowAgents(t *testing.T) {
+	cols := []string{"name", "comment"}
+	row1 := []any{"agent_one", "first"}
+	row2 := []any{"agent_two", ""}
+
+	var gotStatement string
+	var gotQueryTag string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req sqlStatementRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		gotStatement = req.Statement
+		if req.Parameters != nil {
+			gotQueryTag = req.Parameters["query_tag"]
+		}
+
+		resp := sqlStatementResponse{
+			Data: [][]any{row1, row2},
+			ResultSetMetaData: struct {
+				RowType []sqlRowType `json:"rowType"`
+			}{
+				RowType: []sqlRowType{{Name: cols[0]}, {Name: cols[1]}},
+			},
+		}
+		data, err := json.Marshal(resp)
+		if err != nil {
+			t.Fatalf("marshal response: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	c := newDescribeTestClient(t, srv)
+	listed, err := c.ListAgents(WithQueryTagCommand(context.Background(), "run"), "MY_DB", "PUBLIC")
+	if err != nil {
+		t.Fatalf("ListAgents() error = %v", err)
+	}
+	if gotStatement != "SHOW AGENTS IN SCHEMA MY_DB.PUBLIC" {
+		t.Fatalf("statement = %q, want %q", gotStatement, "SHOW AGENTS IN SCHEMA MY_DB.PUBLIC")
+	}
+	if gotQueryTag != "coragent:run" {
+		t.Fatalf("query_tag = %q, want %q", gotQueryTag, "coragent:run")
+	}
+	if len(listed) != 2 {
+		t.Fatalf("len(listed) = %d, want 2", len(listed))
+	}
+	if listed[0].Name != "agent_one" || listed[0].Comment != "first" {
+		t.Fatalf("listed[0] = %+v", listed[0])
+	}
+	if listed[1].Name != "agent_two" {
+		t.Fatalf("listed[1] = %+v", listed[1])
+	}
+}
+
 // TestDescribeAgentFull_AllKnownColumns verifies that all known SQL columns
 // are handled without appearing in UnmappedColumns.
 func TestDescribeAgentFull_AllKnownColumns(t *testing.T) {

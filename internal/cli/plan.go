@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -44,7 +43,7 @@ func newPlanCmd(opts *RootOptions) *cobra.Command {
 				return err
 			}
 
-			planItems, err := buildPlanItems(context.Background(), specs, opts, cfg, client, client)
+			planItems, err := buildPlanItems(commandContext("plan"), specs, opts, cfg, client, client)
 			if err != nil {
 				return err
 			}

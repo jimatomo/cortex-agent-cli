@@ -189,6 +189,17 @@ Settings are resolved in the following order (highest priority first):
 3. Environment variables: `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA`, etc.
 4. Snowflake CLI config.toml (`~/.snowflake/config.toml`)
 
+### `.coragent.toml`
+
+Project and user settings can also be defined in `.coragent.toml` (current directory) or `~/.coragent/config.toml`.
+
+```toml
+[query_tag]
+base = "coragent"
+```
+
+`query_tag.base` sets the base value used for supported Snowflake query tagging. When unset, `coragent` is used. The CLI appends the current command name for supported SQL-backed requests, for example `coragent:plan`, `coragent:run` (agent selection lookup), or `coragent:feedback`.
+
 ### Snowflake CLI config.toml
 
 The CLI reads `~/.snowflake/config.toml` — the same file used by Snowflake CLI (`snow`) and the Python connector. The file is searched in the following order:

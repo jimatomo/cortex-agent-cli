@@ -88,9 +88,42 @@ func (c *Client) DescribeAgent(ctx context.Context, db, schema, name string) (De
 
 // ListAgents returns a summary list of agents in the given database and schema.
 func (c *Client) ListAgents(ctx context.Context, db, schema string) ([]AgentListItem, error) {
-	var out []AgentListItem
-	if err := c.doJSON(ctx, http.MethodGet, c.agentsURL(db, schema), nil, &out); err != nil {
+	stmt := fmt.Sprintf(
+		"SHOW AGENTS IN SCHEMA %s.%s",
+		identifierSegment(db),
+		identifierSegment(schema),
+	)
+	resp, err := c.executeStatement(ctx, db, schema, stmt)
+	if err != nil {
 		return nil, err
+	}
+
+	colIndex := make(map[string]int)
+	for i, col := range resp.ResultSetMetaData.RowType {
+		colIndex[strings.ToLower(col.Name)] = i
+	}
+	nameIdx, hasName := colIndex["name"]
+	commentIdx, hasComment := colIndex["comment"]
+	if !hasName {
+		return nil, fmt.Errorf("show agents: missing name column")
+	}
+
+	out := make([]AgentListItem, 0, len(resp.Data))
+	for _, row := range resp.Data {
+		if nameIdx >= len(row) {
+			continue
+		}
+		name, ok := row[nameIdx].(string)
+		if !ok || strings.TrimSpace(name) == "" {
+			continue
+		}
+		item := AgentListItem{Name: name}
+		if hasComment && commentIdx < len(row) {
+			if comment, ok := row[commentIdx].(string); ok {
+				item.Comment = comment
+			}
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }

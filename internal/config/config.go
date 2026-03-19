@@ -12,6 +12,7 @@ import (
 type CoragentConfig struct {
 	Eval     EvalSettings     `toml:"eval"`
 	Feedback FeedbackSettings `toml:"feedback"`
+	QueryTag QueryTagSettings `toml:"query_tag"`
 }
 
 // FeedbackSettings holds feedback-related configuration.
@@ -36,6 +37,11 @@ type EvalSettings struct {
 	JudgeModel             string   `toml:"judge_model"`
 	ResponseScoreThreshold int      `toml:"response_score_threshold"`
 	IgnoreTools            []string `toml:"ignore_tools"`
+}
+
+// QueryTagSettings configures the base query tag value used for Snowflake requests.
+type QueryTagSettings struct {
+	Base string `toml:"base"`
 }
 
 // LoadCoragentConfig loads configuration from .coragent.toml.

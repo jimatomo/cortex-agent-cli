@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -58,7 +57,7 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 					return fmt.Errorf("%s: %w", item.Path, err)
 				}
 
-				_, exists, err := client.GetAgent(context.Background(), target.Database, target.Schema, item.Spec.Name)
+				_, exists, err := client.GetAgent(commandContext("delete"), target.Database, target.Schema, item.Spec.Name)
 				if err != nil {
 					return fmt.Errorf("snowflake API error: %w", err)
 				}
@@ -114,7 +113,7 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 				}
 
 				fmt.Fprintf(os.Stdout, "Deleting %s... ", item.Parsed.Spec.Name)
-				if err := client.DeleteAgent(context.Background(), item.Target.Database, item.Target.Schema, item.Parsed.Spec.Name); err != nil {
+				if err := client.DeleteAgent(commandContext("delete"), item.Target.Database, item.Target.Schema, item.Parsed.Spec.Name); err != nil {
 					fmt.Fprintln(os.Stdout, "failed")
 					return fmt.Errorf("snowflake API error: %w", err)
 				}
@@ -128,4 +127,3 @@ func newDeleteCmd(opts *RootOptions) *cobra.Command {
 	cmd.Flags().BoolVarP(&recursive, "recursive", "R", false, "Recursively load agents from subdirectories")
 	return cmd
 }
-

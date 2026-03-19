@@ -15,11 +15,12 @@ import (
 
 // sqlStatementRequest is the request body for the Snowflake SQL Statement API.
 type sqlStatementRequest struct {
-	Statement string `json:"statement"`
-	Database  string `json:"database,omitempty"`
-	Schema    string `json:"schema,omitempty"`
-	Warehouse string `json:"warehouse,omitempty"`
-	Role      string `json:"role,omitempty"`
+	Statement  string            `json:"statement"`
+	Database   string            `json:"database,omitempty"`
+	Schema     string            `json:"schema,omitempty"`
+	Warehouse  string            `json:"warehouse,omitempty"`
+	Role       string            `json:"role,omitempty"`
+	Parameters map[string]string `json:"parameters,omitempty"`
 }
 
 type sqlRowType struct {
