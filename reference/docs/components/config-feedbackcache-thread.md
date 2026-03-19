@@ -29,6 +29,11 @@ Load project and user settings from `.coragent.toml`.
 - `feedback.remote.enabled` — Enable remote feedback table mode
 - `feedback.remote.database`, `schema`, `table` — Remote feedback table location
 
+### Settings (Query Tag)
+
+- `query_tag.base` — Base query tag value for supported Snowflake requests; defaults to `coragent`
+- Effective tag format — `<base>:<command>` for command-scoped requests such as `plan`, `apply`, `run`, `eval`, and `feedback`
+
 ## FeedbackCache (`internal/feedbackcache`)
 
 ### Purpose

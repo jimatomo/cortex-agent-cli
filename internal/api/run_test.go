@@ -149,6 +149,34 @@ func TestParseSSEStream_Response(t *testing.T) {
 	}
 }
 
+func TestParseSSEStream_ResponseIntegerThreadID(t *testing.T) {
+	body := "event: response\ndata: {\"content\":[{\"type\":\"text\",\"text\":\"answer\"}],\"metadata\":{\"thread_id\":123,\"message_id\":99}}\n\n"
+	var metaTID string
+	var metaMID int64
+	opts := RunAgentOptions{
+		OnMetadata: func(threadID string, messageID int64) {
+			metaTID = threadID
+			metaMID = messageID
+		},
+	}
+	resp, err := parseSSEStream(strings.NewReader(body), opts, noopLog)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || resp.Metadata == nil {
+		t.Fatal("expected response metadata")
+	}
+	if resp.Metadata.ThreadID != "123" {
+		t.Errorf("response metadata threadID = %q, want %q", resp.Metadata.ThreadID, "123")
+	}
+	if metaTID != "123" {
+		t.Errorf("callback metadata threadID = %q, want %q", metaTID, "123")
+	}
+	if metaMID != 99 {
+		t.Errorf("callback metadata messageID = %d, want %d", metaMID, 99)
+	}
+}
+
 func TestParseSSEStream_Status(t *testing.T) {
 	body := "event: response.status\ndata: {\"status\":\"running\",\"message\":\"Processing query\",\"sequence_number\":1}\n\n"
 	var gotStatus, gotMessage string
@@ -227,6 +255,28 @@ func TestParseSSEStream_EmptyBody(t *testing.T) {
 	}
 	if resp != nil {
 		t.Errorf("expected nil response for empty body, got %+v", resp)
+	}
+}
+
+func TestParseSSEStream_MetadataIntegerThreadID(t *testing.T) {
+	body := "event: metadata\ndata: {\"metadata\":{\"thread_id\":456,\"message_id\":789,\"role\":\"assistant\"}}\n\n"
+	var tid string
+	var mid int64
+	opts := RunAgentOptions{
+		OnMetadata: func(threadID string, messageID int64) {
+			tid = threadID
+			mid = messageID
+		},
+	}
+	_, err := parseSSEStream(strings.NewReader(body), opts, noopLog)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tid != "456" {
+		t.Errorf("threadID = %q, want %q", tid, "456")
+	}
+	if mid != 789 {
+		t.Errorf("messageID = %d, want %d", mid, 789)
 	}
 }
 

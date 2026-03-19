@@ -40,6 +40,17 @@ The API package provides the Snowflake Cortex Agent REST client and service inte
 
 Each request adds `Authorization: Bearer <token>` via `auth.AuthHeader(ctx, cfg)`. The client holds `auth.Config` and obtains tokens on demand (JWT or OAuth refresh).
 
+## Query Tagging
+
+- SQL Statement API requests include `parameters.query_tag = <base>:<command>`
+- The base tag comes from `.coragent.toml` / `~/.coragent/config.toml` (`query_tag.base`), defaulting to `coragent`
+- The command suffix is attached in the CLI layer via request context, so nested SQL calls inside `plan`, `apply`, `feedback`, or `run` agent selection retain the originating command name
+
+## Run Streaming Notes
+
+- `RunAgent` consumes Snowflake SSE events from the named-agent `:run` endpoint
+- `metadata.thread_id` and `response.metadata.thread_id` are accepted as either strings or integers and normalized to strings inside the client
+
 ## Related Docs
 
 - [components/auth.md](auth.md) — Config and token acquisition

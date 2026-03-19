@@ -200,3 +200,53 @@ output_dir = "./out"
 			cfg.Feedback.Remote.Database, cfg.Feedback.Remote.Schema, cfg.Feedback.Remote.Table)
 	}
 }
+
+func TestLoadCoragentConfig_QueryTagBase(t *testing.T) {
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origDir) })
+	os.Chdir(dir)
+
+	content := `[query_tag]
+base = "team-cli"
+`
+	if err := os.WriteFile(filepath.Join(dir, ".coragent.toml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg := LoadCoragentConfig()
+	if cfg.QueryTag.Base != "team-cli" {
+		t.Errorf("expected query tag base team-cli, got %q", cfg.QueryTag.Base)
+	}
+}
+
+func TestLoadCoragentConfig_QueryTagBaseGlobalFallback(t *testing.T) {
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	workDir := filepath.Join(dir, "work")
+	if err := os.Mkdir(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir work: %v", err)
+	}
+	os.Chdir(workDir)
+
+	fakeHome := filepath.Join(dir, "home")
+	coragentDir := filepath.Join(fakeHome, ".coragent")
+	if err := os.MkdirAll(coragentDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	content := `[query_tag]
+base = "global-base"
+`
+	if err := os.WriteFile(filepath.Join(coragentDir, "config.toml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+
+	t.Setenv("HOME", fakeHome)
+
+	cfg := LoadCoragentConfig()
+	if cfg.QueryTag.Base != "global-base" {
+		t.Errorf("expected global query tag base, got %q", cfg.QueryTag.Base)
+	}
+}

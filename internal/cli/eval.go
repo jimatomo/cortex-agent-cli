@@ -225,7 +225,7 @@ func runEvalTest(client *api.Client, target Target, agentName string, tc agent.E
 		ExpectedResponse: tc.ExpectedResponse,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(commandContext("eval"), 15*time.Minute)
 	defer cancel()
 
 	// Run agent only when question is specified

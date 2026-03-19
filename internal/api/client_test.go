@@ -1,8 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"sort"
 	"strings"
 	"testing"
@@ -34,6 +38,48 @@ func TestIsNotFoundError(t *testing.T) {
 				t.Errorf("isNotFoundError(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestResolveQueryTag(t *testing.T) {
+	c := &Client{queryTagBase: "team-cli"}
+
+	if got := c.resolveQueryTag(context.Background()); got != "team-cli" {
+		t.Fatalf("resolveQueryTag() = %q, want %q", got, "team-cli")
+	}
+
+	ctx := WithQueryTagCommand(context.Background(), "apply")
+	if got := c.resolveQueryTag(ctx); got != "team-cli:apply" {
+		t.Fatalf("resolveQueryTag(with command) = %q, want %q", got, "team-cli:apply")
+	}
+}
+
+func TestDoJSON_SQLAddsQueryTag(t *testing.T) {
+	var gotPayload sqlStatementRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	base, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	client := newDescribeTestClient(t, srv)
+	client.baseURL = base
+	client.SetQueryTagBase("team-cli")
+
+	payload := sqlStatementRequest{Statement: "SELECT 1"}
+	if err := client.doJSON(WithQueryTagCommand(context.Background(), "feedback"), http.MethodPost, client.sqlURL(), payload, nil); err != nil {
+		t.Fatalf("doJSON() error = %v", err)
+	}
+
+	if gotPayload.Parameters["query_tag"] != "team-cli:feedback" {
+		t.Fatalf("parameters.query_tag = %q, want %q", gotPayload.Parameters["query_tag"], "team-cli:feedback")
 	}
 }
 
@@ -412,8 +458,8 @@ func TestMergeAgentSpecs(t *testing.T) {
 			},
 		},
 		{
-			name: "tools overwritten",
-			base: agent.AgentSpec{Tools: []agent.Tool{{ToolSpec: map[string]any{"name": "old"}}}},
+			name:  "tools overwritten",
+			base:  agent.AgentSpec{Tools: []agent.Tool{{ToolSpec: map[string]any{"name": "old"}}}},
 			extra: agent.AgentSpec{Tools: []agent.Tool{{ToolSpec: map[string]any{"name": "new"}}}},
 			check: func(s agent.AgentSpec) error {
 				if len(s.Tools) != 1 || s.Tools[0].ToolSpec["name"] != "new" {

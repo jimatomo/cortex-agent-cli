@@ -15,12 +15,13 @@ import (
 
 // Client is the Snowflake Cortex Agent API client.
 type Client struct {
-	baseURL   *url.URL
-	role      string
-	userAgent string
-	http      *http.Client
-	authCfg   auth.Config
-	log       *slog.Logger
+	baseURL      *url.URL
+	role         string
+	userAgent    string
+	http         *http.Client
+	authCfg      auth.Config
+	queryTagBase string
+	log          *slog.Logger
 }
 
 // APIError represents a non-2xx HTTP response from the Snowflake API.
@@ -79,11 +80,12 @@ func NewClient(cfg auth.Config) (*Client, error) {
 // Intended for use in tests against mock HTTP servers — no real Snowflake credentials required.
 func NewClientForTest(base *url.URL, cfg auth.Config) *Client {
 	return &Client{
-		baseURL:   base,
-		userAgent: "test",
-		http:      &http.Client{Timeout: 30 * time.Second},
-		authCfg:   cfg,
-		log:       discardLogger(),
+		baseURL:      base,
+		userAgent:    "test",
+		http:         &http.Client{Timeout: 30 * time.Second},
+		authCfg:      cfg,
+		queryTagBase: "coragent",
+		log:          discardLogger(),
 	}
 }
 
@@ -112,13 +114,19 @@ func NewClientWithDebug(cfg auth.Config, debug bool) (*Client, error) {
 	}
 
 	client := &Client{
-		baseURL:   base,
-		role:      strings.ToUpper(strings.TrimSpace(cfg.Role)),
-		userAgent: "coragent",
-		http:      &http.Client{Timeout: 60 * time.Second},
-		authCfg:   cfg,
-		log:       log,
+		baseURL:      base,
+		role:         strings.ToUpper(strings.TrimSpace(cfg.Role)),
+		userAgent:    "coragent",
+		http:         &http.Client{Timeout: 60 * time.Second},
+		authCfg:      cfg,
+		queryTagBase: "coragent",
+		log:          log,
 	}
 
 	return client, nil
+}
+
+// SetQueryTagBase overrides the default base tag used for supported Snowflake requests.
+func (c *Client) SetQueryTagBase(base string) {
+	c.queryTagBase = strings.TrimSpace(base)
 }

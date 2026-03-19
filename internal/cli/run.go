@@ -77,7 +77,7 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
 				return err
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			ctx, cancel := context.WithTimeout(commandContext("run"), 15*time.Minute)
 			defer cancel()
 
 			// Determine agent name
@@ -110,7 +110,7 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
 				}
 			}
 
-			ctx, cancel = context.WithTimeout(context.Background(), 15*time.Minute)
+			ctx, cancel = context.WithTimeout(commandContext("run"), 15*time.Minute)
 			defer cancel()
 
 			// Determine thread settings
@@ -280,4 +280,3 @@ to continue a specific thread, or --without-thread for single-turn mode.`,
 
 	return cmd
 }
-

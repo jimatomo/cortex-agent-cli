@@ -8,14 +8,14 @@ Canonical inventory of all coragent commands and subcommands, with implementatio
 - **Use:** `plan [path]`
 - **Entry:** `newPlanCmd` → RunE closure
 - **Dependencies:** `agent.LoadAgents`, `buildClientAndCfg`, `buildPlanItems`, `diff.DiffForCreate`, `diff.HasChanges`, `grant.GrantDiff`
-- **Side effects:** API read (GetAgent, ShowGrants); stdout only
+- **Side effects:** API read (GetAgent, ShowGrants); stdout only; SQL query tag defaults to `coragent:plan`
 - **Flags:** `-R`/`--recursive`
 
 ### apply [path]
 - **Use:** `apply [path]`
 - **Entry:** `newApplyCmd` → RunE closure
 - **Dependencies:** `agent.LoadAgents`, `buildClientAndCfg`, `buildPlanItems`, `executeApply`, `diff`, `grant`, `config.LoadCoragentConfig`
-- **Side effects:** API write (CreateAgent, UpdateAgent, ExecuteGrant, ExecuteRevoke); optional eval run; confirmation prompt
+- **Side effects:** API write (CreateAgent, UpdateAgent, ExecuteGrant, ExecuteRevoke); optional eval run; confirmation prompt; SQL query tag defaults to `coragent:apply`
 - **Flags:** `-y`/`--yes`, `-R`/`--recursive`, `--eval`
 
 ### delete [path]
@@ -36,7 +36,7 @@ Canonical inventory of all coragent commands and subcommands, with implementatio
 - **Use:** `export <agent-name>`
 - **Entry:** `newExportCmd` → RunE closure
 - **Dependencies:** `buildClientAndCfg`, `ResolveTargetForExport`, `client.DescribeAgent`
-- **Side effects:** API read; stdout or file write (`-o`)
+- **Side effects:** API read; stdout or file write (`-o`); SQL query tag defaults to `coragent:export`
 - **Flags:** `-o`/`--out`
 
 ### new
@@ -50,7 +50,7 @@ Canonical inventory of all coragent commands and subcommands, with implementatio
 - **Use:** `run [agent-name]`
 - **Entry:** `newRunCmd` → RunE closure
 - **Dependencies:** `buildClientAndCfg`, `ResolveTargetForExport`, `api.RunAgent`, `thread.LoadState`, `thread.Save`
-- **Side effects:** API (RunAgent, CreateThread); thread state read/write; streaming stdout/stderr
+- **Side effects:** API (RunAgent, CreateThread); thread state read/write; streaming stdout/stderr. When agent-name is omitted, the pre-run agent lookup uses the `run` SQL query tag context.
 - **Flags:** `-m`/`--message`, `--show-thinking`, `--new`, `--thread`, `--without-thread`
 
 ### threads
@@ -72,6 +72,7 @@ Canonical inventory of all coragent commands and subcommands, with implementatio
 - **Entry:** `newFeedbackCmd` → RunE closure
 - **Dependencies:** `config.LoadCoragentConfig`, `buildClientAndCfg`, `api.GetFeedback`, `api.FeedbackTableExists`, `api.SyncFeedbackFromEventsToTable`, `api.GetFeedbackFromTable`, `feedbackcache`
 - **Side effects:** API read/write (feedback fetch, remote table sync/update/clear); feedback cache read/write in local mode; optional remote table init. With `--no-refresh`, skip API fetch in local mode and skip remote table sync in remote mode, reading only saved state before any optional checked updates. With `--infer-negative`, request-only interactions are selected from observability with a separate SQL query and individually scored via `SELECT SNOWFLAKE.CORTEX.AI_COMPLETE(...) AS response` using a single-string prompt plus structured output; the model can be overridden with `feedback.judge_model`, and both negative and positive inferred classifications are persisted so previously judged rows are not rescored on later runs. Remote mode requires a table initialized via `feedback --init`, then uses transient stage-table `INSERT` and final `MERGE` statements. When `feedback --init` finds an existing remote table, it can rename that table to a timestamped backup before recreating the configured table.
+- **Side effects:** API read/write (feedback fetch, remote table sync/update/clear); feedback cache read/write in local mode; optional remote table init. With `--no-refresh`, skip API fetch in local mode and skip remote table sync in remote mode, reading only saved state before any optional checked updates. With `--infer-negative`, request-only interactions are selected from observability with a separate SQL query and individually scored via `SELECT SNOWFLAKE.CORTEX.AI_COMPLETE(...) AS response` using a single-string prompt plus structured output; the model can be overridden with `feedback.judge_model`, and both negative and positive inferred classifications are persisted so previously judged rows are not rescored on later runs. Remote mode requires a table initialized via `feedback --init`, then uses transient stage-table `INSERT` and final `MERGE` statements. When `feedback --init` finds an existing remote table, it can rename that table to a timestamped backup before recreating the configured table. SQL query tag defaults to `coragent:feedback`.
 - **Flags:** `--all`, `--limit`, `--json` (returns `[]` when no records), `-y`/`--yes`, `--include-checked`, `--no-tools`, `--no-refresh`, `--infer-negative`, `--clear`, `--init`
 
 ### login

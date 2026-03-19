@@ -14,6 +14,12 @@ import (
 )
 
 func (c *Client) doJSON(ctx context.Context, method, urlStr string, payload any, out any) error {
+	if method == http.MethodPost {
+		if sqlPayload, ok := payload.(sqlStatementRequest); ok {
+			payload = c.sqlRequestWithQueryTag(ctx, sqlPayload)
+		}
+	}
+
 	var body io.Reader
 	var reqBody []byte
 	if payload != nil {

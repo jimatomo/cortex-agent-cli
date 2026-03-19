@@ -18,6 +18,8 @@ These flows cover agent execution (`run`), feedback retrieval (`feedback`), and 
    - Prompt to select existing thread or create new
 4. **Run** — `client.RunAgent` with message; stream response events
 5. **State update** — On completion, update thread state (summary, last used) and save
+6. **Query tagging** — When agent-name is omitted, the pre-run agent lookup uses the `run` query tag context through the SQL API
+7. **Thread ID normalization** — SSE metadata may return `thread_id` as either a string or integer; the client normalizes it to a string before updating local thread state
 
 ### Dependencies
 
@@ -49,6 +51,7 @@ These flows cover agent execution (`run`), feedback retrieval (`feedback`), and 
 6. Display records (default negative only; `--all` for all). Response bodies are printed in full without truncation in the interactive text output
 7. Prompt to mark as checked; update remote table or local cache depending on mode
 8. In non-JSON mode, the command prints short progress lines to stdout while loading cache/remote state, refreshing, and preparing the final record list
+9. SQL-based feedback operations use the `feedback` query tag context by default (`coragent:feedback`)
 
 ### `--infer-negative` Detailed Flow
 

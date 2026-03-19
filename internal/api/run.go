@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -91,6 +92,39 @@ type ResponseMetadata struct {
 	MessageID int64  `json:"message_id,omitempty"`
 }
 
+// UnmarshalJSON handles thread_id as either a string or integer.
+func (m *ResponseMetadata) UnmarshalJSON(data []byte) error {
+	type Alias ResponseMetadata
+	aux := &struct {
+		ThreadID json.RawMessage `json:"thread_id"`
+		*Alias
+	}{
+		Alias: (*Alias)(m),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	if aux.ThreadID == nil {
+		return nil
+	}
+
+	var strID string
+	if err := json.Unmarshal(aux.ThreadID, &strID); err == nil {
+		m.ThreadID = strID
+		return nil
+	}
+
+	var intID int64
+	if err := json.Unmarshal(aux.ThreadID, &intID); err == nil {
+		m.ThreadID = strconv.FormatInt(intID, 10)
+		return nil
+	}
+
+	return fmt.Errorf("thread_id must be string or integer")
+}
+
 // ResponseContentBlock represents a content block in the final response.
 type ResponseContentBlock struct {
 	Type       string          `json:"type"` // "text", "thinking", "tool_use", "tool_result"
@@ -121,6 +155,43 @@ type MetadataEvent struct {
 		ThreadID  string `json:"thread_id"`
 		Role      string `json:"role"`
 	} `json:"metadata"`
+}
+
+// UnmarshalJSON handles metadata.thread_id as either a string or integer.
+func (m *MetadataEvent) UnmarshalJSON(data []byte) error {
+	type metadataAlias struct {
+		MessageID int64           `json:"message_id"`
+		ThreadID  json.RawMessage `json:"thread_id"`
+		Role      string          `json:"role"`
+	}
+	aux := struct {
+		Metadata metadataAlias `json:"metadata"`
+	}{}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	m.Metadata.MessageID = aux.Metadata.MessageID
+	m.Metadata.Role = aux.Metadata.Role
+
+	if aux.Metadata.ThreadID == nil {
+		return nil
+	}
+
+	var strID string
+	if err := json.Unmarshal(aux.Metadata.ThreadID, &strID); err == nil {
+		m.Metadata.ThreadID = strID
+		return nil
+	}
+
+	var intID int64
+	if err := json.Unmarshal(aux.Metadata.ThreadID, &intID); err == nil {
+		m.Metadata.ThreadID = strconv.FormatInt(intID, 10)
+		return nil
+	}
+
+	return fmt.Errorf("metadata.thread_id must be string or integer")
 }
 
 // RunAgentOptions configures callbacks for streaming events.
