@@ -47,7 +47,8 @@ flowchart LR
 - **Plan:** Prints only agents that will be created or updated, with diff details and grant changes; unchanged agents are omitted from the detailed body and counted only in the summary
 - **Apply:** Uses the same preview output as `plan`, then confirmation prompt (unless `-y`), then `executeApply`
 - **Value rendering:** String diff values are printed in full (quoted for readability) and are not truncated, so long values and multibyte text such as Japanese remain intact in plan/apply/delete previews
-- **Modified rendering:** Updated values use a colored arrow between before/after values to make replacements easier to scan in the CLI output
+- **Modified rendering:** Updated values render as Terraform-like `~ field =` headers with nested `-`/`+` lines instead of a single `before -> after` line
+- **Multiline strings:** When a changed value is a multiline string, the preview shows a GitHub Actions-style contextual diff: changed lines are rendered with `-`/`+`, unchanged context lines are shown around them, and each hunk keeps up to one line of context before and after the change
 
 ### 5. Execute Apply
 

@@ -10,8 +10,6 @@ import (
 	"coragent/internal/auth"
 	"coragent/internal/diff"
 	"coragent/internal/grant"
-
-	"github.com/fatih/color"
 )
 
 func TestFormatValue(t *testing.T) {
@@ -61,16 +59,55 @@ func TestChangeSymbol(t *testing.T) {
 	}
 }
 
-func TestFormatChange_ModifiedArrowColored(t *testing.T) {
+func TestFormatChange_ModifiedScalarUsesMinusAndPlus(t *testing.T) {
 	got := formatChange(diff.Change{
 		Type:   diff.Modified,
 		Before: "before",
 		After:  "after",
 	})
 
-	want := `"before"` + " " + color.New(color.FgYellow).Sprint("->") + " " + `"after"`
-	if got != want {
-		t.Fatalf("formatChange() = %q, want %q", got, want)
+	want := []renderedChangeLine{
+		{Type: diff.Removed, Text: `"before"`},
+		{Type: diff.Added, Text: `"after"`},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len(formatChange()) = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("formatChange()[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestFormatChange_ModifiedMultilineUsesLineDiff(t *testing.T) {
+	got := formatChange(diff.Change{
+		Type: diff.Modified,
+		Before: strings.Join([]string{
+			"line one",
+			"line two",
+			"line three",
+		}, "\n"),
+		After: strings.Join([]string{
+			"line one",
+			"line B",
+			"line three",
+		}, "\n"),
+	})
+
+	want := []renderedChangeLine{
+		{Text: "line one", IsContext: true},
+		{Type: diff.Removed, Text: "line two"},
+		{Type: diff.Added, Text: "line B"},
+		{Text: "line three", IsContext: true},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len(formatChange()) = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("formatChange()[%d] = %+v, want %+v", i, got[i], want[i])
+		}
 	}
 }
 
@@ -169,7 +206,6 @@ func TestPlanToGrantRows_Empty(t *testing.T) {
 }
 
 func TestPlanToGrantRows_TypeConversion(t *testing.T) {
-	// Verify conversion produces the correct grant.ShowGrantsRow type
 	input := []api.ShowGrantsRow{
 		{Privilege: "USAGE", GrantedTo: "ROLE", GranteeName: "R1"},
 	}
@@ -227,6 +263,15 @@ func TestWritePlanPreview_HidesUnchangedItems(t *testing.T) {
 	if !strings.Contains(out, "UPDATED:") {
 		t.Fatalf("updated item missing from output:\n%s", out)
 	}
+	if !strings.Contains(out, "  ~ comment =") {
+		t.Fatalf("modified field header missing from output:\n%s", out)
+	}
+	if !strings.Contains(out, "      - \"old\"") {
+		t.Fatalf("removed scalar line missing from output:\n%s", out)
+	}
+	if !strings.Contains(out, "      + \"new\"") {
+		t.Fatalf("added scalar line missing from output:\n%s", out)
+	}
 	if !strings.Contains(out, "CREATED:") {
 		t.Fatalf("created item missing from output:\n%s", out)
 	}
@@ -235,5 +280,67 @@ func TestWritePlanPreview_HidesUnchangedItems(t *testing.T) {
 	}
 	if summary.createCount != 1 || summary.updateCount != 1 || summary.noChangeCount != 1 {
 		t.Fatalf("unexpected summary: %+v", summary)
+	}
+}
+
+func TestWritePlanPreview_ShowsMultilineStringDiff(t *testing.T) {
+	items := []applyItem{
+		{
+			Parsed: agent.ParsedAgent{
+				Path: "updated.yaml",
+				Spec: agent.AgentSpec{Name: "UPDATED"},
+			},
+			Target: Target{Database: "TEST_DB", Schema: "PUBLIC"},
+			Exists: true,
+			Changes: []diff.Change{
+				{
+					Path: "instructions",
+					Type: diff.Modified,
+					Before: strings.Join([]string{
+						"line 1",
+						"line 2",
+						"line 3",
+						"line 4",
+						"line 5 old",
+						"line 6",
+						"line 7",
+						"line 8",
+						"line 9",
+					}, "\n"),
+					After: strings.Join([]string{
+						"line 1",
+						"line 2",
+						"line 3",
+						"line 4",
+						"line 5 new",
+						"line 6",
+						"line 7",
+						"line 8",
+						"line 9",
+					}, "\n"),
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	_, err := writePlanPreview(&buf, items)
+	if err != nil {
+		t.Fatalf("writePlanPreview: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "  ~ instructions =") {
+		t.Fatalf("multiline field header missing from output:\n%s", out)
+	}
+	for _, want := range []string{"        line 4", "      - line 5 old", "      + line 5 new", "        line 6"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected multiline diff context %q missing from output:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"        line 1", "        line 2", "        line 3", "        line 7", "        line 8", "        line 9"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("lines outside the 1-line context window should be omitted, got:\n%s", out)
+		}
 	}
 }

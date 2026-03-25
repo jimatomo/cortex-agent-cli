@@ -46,11 +46,7 @@ func writePlanPreview(w io.Writer, items []applyItem) (planPreviewSummary, error
 		}
 
 		for _, c := range item.Changes {
-			fmt.Fprintf(w, "  %s %s: %s\n",
-				changeSymbol(c.Type),
-				c.Path,
-				formatChange(c),
-			)
+			writePlanChange(w, c)
 		}
 		writeGrantPlan(w, item.GrantDiff)
 	}
@@ -83,6 +79,29 @@ func summarizePlanPreview(items []applyItem) planPreviewSummary {
 
 func isUnchangedPlanItem(item applyItem) bool {
 	return item.Exists && !diff.HasChanges(item.Changes) && !item.GrantDiff.HasChanges()
+}
+
+func writePlanChange(w io.Writer, c diff.Change) {
+	if c.Type == diff.Modified {
+		fmt.Fprintf(w, "  %s %s =\n", changeSymbol(c.Type), c.Path)
+		for _, line := range formatChange(c) {
+			switch {
+			case line.IsDivider:
+				fmt.Fprintln(w, "      ...")
+			case line.IsContext:
+				fmt.Fprintf(w, "        %s\n", line.Text)
+			default:
+				fmt.Fprintf(w, "      %s %s\n", changeSymbol(line.Type), line.Text)
+			}
+		}
+		return
+	}
+
+	formatted := formatChange(c)
+	if len(formatted) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "  %s %s = %s\n", changeSymbol(c.Type), c.Path, formatted[0].Text)
 }
 
 func writeGrantPlan(w io.Writer, diff grant.GrantDiff) {
